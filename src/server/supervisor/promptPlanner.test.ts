@@ -89,6 +89,7 @@ function project(patch: Partial<ProjectDetail>): ProjectDetail {
     currentSupervisorPrompt: null,
     verification: {
       overallStatus: "unknown",
+      latestTier: null,
       recent: []
     },
     userRequiredItems: [],

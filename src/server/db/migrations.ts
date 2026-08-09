@@ -593,6 +593,18 @@ create table if not exists supervisor_instructions (
 create index if not exists idx_supervisor_instructions_project_status
   on supervisor_instructions(project_id, status, created_at desc);
 `
+  },
+  {
+    id: "0010_verification_tier_metadata",
+    description: "Record verification tier and rationale",
+    sql: `
+alter table verification_results
+  add column if not exists verification_tier text check (verification_tier in ('T0', 'T1', 'T2', 'T3', 'T4')),
+  add column if not exists rationale text;
+
+create index if not exists idx_verification_results_project_tier
+  on verification_results(project_id, verification_tier, created_at desc);
+`
   }
 ];
 
@@ -651,5 +663,6 @@ export const expectedMvpIndexes = [
   "idx_project_git_automation_events_project_created",
   "idx_artifacts_created",
   "idx_artifacts_retention",
-  "idx_supervisor_instructions_project_status"
+  "idx_supervisor_instructions_project_status",
+  "idx_verification_results_project_tier"
 ] as const;

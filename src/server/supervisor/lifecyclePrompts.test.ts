@@ -87,7 +87,7 @@ function project(): ProjectDetail {
     progress: { totalGates: 0, completedGates: 0, percent: 0, gates: [] },
     timeline: [],
     currentSupervisorPrompt: null,
-    verification: { overallStatus: "unknown", recent: [] },
+    verification: { overallStatus: "unknown", latestTier: null, recent: [] },
     userRequiredItems: [],
     supervisorInstructions: [],
     recentArtifacts: [],

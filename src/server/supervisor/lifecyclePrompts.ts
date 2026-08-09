@@ -1,4 +1,5 @@
 import type { ProgressGateSummary, ProjectDetail } from "../projects/service.js";
+import { defaultVerificationTierForPhase, type VerificationTier } from "./verificationTiers.js";
 
 export type LifecyclePromptArea =
   | "product_definition"
@@ -25,7 +26,7 @@ export type LifecyclePromptTemplate = {
     | "bug_fixing"
     | "screenshot_analysis"
     | "release_readiness_summary";
-  verificationTier: "T0" | "T1" | "T2" | "T3" | "T4";
+  verificationTier: VerificationTier;
   build: (input: { project: ProjectDetail; gate?: ProgressGateSummary }) => string;
 };
 
@@ -204,10 +205,13 @@ export function buildLifecyclePrompt(input: {
 } {
   const area = lifecycleAreaForGate(input.gate);
   const template = lifecyclePromptTemplates[area];
+  const verificationTier = input.gate
+    ? defaultVerificationTierForPhase(input.gate.phase, input.gate.key)
+    : template.verificationTier;
   return {
     area,
     taskType: template.taskType,
-    verificationTier: template.verificationTier,
+    verificationTier,
     prompt: template.build(input)
   };
 }

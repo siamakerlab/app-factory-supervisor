@@ -64,6 +64,7 @@ export type ProjectDetail = ProjectSummary & {
   currentSupervisorPrompt: string | null;
   verification: {
     overallStatus: "unknown" | "pass" | "fail" | "mixed";
+    latestTier: string | null;
     recent: VerificationSummary[];
   };
   userRequiredItems: UserRequiredItemSummary[];
@@ -111,6 +112,8 @@ export type VerificationSummary = {
   runId: string | null;
   checkType: string;
   status: "pass" | "fail" | "skipped";
+  verificationTier: string | null;
+  rationale: string | null;
   command: string | null;
   summary: string | null;
   artifactId: string | null;
@@ -197,6 +200,8 @@ type VerificationRow = {
   run_id: string | null;
   check_type: string;
   status: VerificationSummary["status"];
+  verification_tier: string | null;
+  rationale: string | null;
   command: string | null;
   summary: string | null;
   artifact_id: string | null;
@@ -464,6 +469,7 @@ export class ProjectService {
       currentSupervisorPrompt,
       verification: {
         overallStatus: verificationStatus(verification),
+        latestTier: verification[0]?.verificationTier ?? null,
         recent: verification
       },
       userRequiredItems,
@@ -612,7 +618,8 @@ export class ProjectService {
   private async getVerification(projectId: string): Promise<VerificationSummary[]> {
     const result = await this.database.pool.query<VerificationRow>(
       `
-        select id, run_id, check_type, status, command, summary, artifact_id, created_at
+        select id, run_id, check_type, status, verification_tier, rationale,
+          command, summary, artifact_id, created_at
         from verification_results
         where project_id = $1
         order by created_at desc
@@ -625,6 +632,8 @@ export class ProjectService {
       runId: row.run_id,
       checkType: row.check_type,
       status: row.status,
+      verificationTier: row.verification_tier,
+      rationale: row.rationale,
       command: row.command,
       summary: row.summary,
       artifactId: row.artifact_id,

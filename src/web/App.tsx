@@ -294,10 +294,13 @@ type ProjectDetail = ProjectSummary & {
   currentSupervisorPrompt: string | null;
   verification: {
     overallStatus: "unknown" | "pass" | "fail" | "mixed";
+    latestTier: string | null;
     recent: Array<{
       id: string;
       checkType: string;
       status: "pass" | "fail" | "skipped";
+      verificationTier: string | null;
+      rationale: string | null;
       summary: string | null;
       artifactId: string | null;
       createdAt: string;
@@ -1243,6 +1246,7 @@ function ProjectDetailPanel({
             ["Repository", project.repositoryUrl],
             ["Current phase", project.currentPhase],
             ["Verification", project.verification.overallStatus],
+            ["Latest tier", project.verification.latestTier ?? "none"],
             ["Final status", project.finalStatusSummary]
           ]}
         />
@@ -1356,8 +1360,8 @@ function ProjectDetailPanel({
             {project.verification.recent.slice(0, 8).map((check) => (
               <div className="mini-row" key={check.id}>
                 <span>{check.checkType}</span>
-                <span>{check.status}</span>
-                <span>{check.summary ?? check.createdAt}</span>
+                <span>{check.verificationTier ?? check.status}</span>
+                <span>{check.rationale ?? check.summary ?? check.createdAt}</span>
               </div>
             ))}
             {project.verification.recent.length === 0 ? (
