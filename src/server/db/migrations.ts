@@ -442,6 +442,31 @@ create table if not exists app_audit_events (
 
 create index if not exists idx_app_audit_events_type_created on app_audit_events(event_type, created_at);
 `
+  },
+  {
+    id: "0003_setup_wizard",
+    description: "Add first-run setup wizard state",
+    sql: `
+create table if not exists setup_wizard_state (
+  id boolean primary key default true,
+  admin_step_status text not null default 'pending' check (admin_step_status in ('pending', 'pass', 'fail')),
+  environment_step_status text not null default 'pending' check (environment_step_status in ('pending', 'pass', 'fail')),
+  ssh_step_status text not null default 'pending' check (ssh_step_status in ('pending', 'pass', 'fail')),
+  setup_complete boolean not null default false,
+  os_name text,
+  cpu_arch text,
+  install_paths jsonb not null default '{}'::jsonb,
+  command_checks jsonb not null default '[]'::jsonb,
+  ssh_public_key_path text,
+  last_error text,
+  updated_at timestamptz not null,
+  constraint setup_wizard_state_singleton check (id)
+);
+
+insert into setup_wizard_state (id, updated_at)
+values (true, now())
+on conflict (id) do nothing;
+`
   }
 ];
 

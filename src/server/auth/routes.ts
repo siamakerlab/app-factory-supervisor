@@ -47,10 +47,6 @@ export function registerAuthRoutes(
     }
   });
 
-  server.get("/api/setup/status", async () => ({
-    adminConfigured: await authService.isAdminConfigured()
-  }));
-
   server.post("/api/setup/admin", async (request, reply) => {
     try {
       const body = createAdminSchema.parse(request.body);

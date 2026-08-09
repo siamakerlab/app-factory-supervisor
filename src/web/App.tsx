@@ -68,6 +68,31 @@ type Fail2banResponse = {
   }>;
 };
 
+type SetupStatus = {
+  adminConfigured: boolean;
+  setupComplete: boolean;
+  steps: {
+    admin: "pending" | "pass" | "fail";
+    environment: "pending" | "pass" | "fail";
+    ssh: "pending" | "pass" | "fail";
+  };
+  platform: {
+    os: string | null;
+    arch: string | null;
+  };
+  installPaths: Record<string, string>;
+  commandChecks: Array<{
+    id: string;
+    command: string;
+    required: boolean;
+    status: "pass" | "fail";
+    output: string;
+  }>;
+  sshPublicKey: string | null;
+  sshPublicKeyPath: string | null;
+  lastError: string | null;
+};
+
 type SettingsTab =
   | "user"
   | "email"
@@ -146,6 +171,7 @@ export function App() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fail2ban, setFail2ban] = useState<Fail2banResponse | null>(null);
+  const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -159,8 +185,9 @@ export function App() {
       const setupResponse = await fetch("/api/setup/status", {
         credentials: "include"
       });
-      const setup = (await setupResponse.json()) as { adminConfigured: boolean };
-      if (!setup.adminConfigured) {
+      const setupStatus = (await setupResponse.json()) as SetupStatus;
+      setSetup(setupStatus);
+      if (!setupStatus.adminConfigured) {
         setApiState("setup");
         return;
       }
@@ -252,6 +279,16 @@ export function App() {
             </span>
           </div>
         </header>
+
+        {setup && !setup.setupComplete ? (
+          <WizardPanel
+            setup={setup}
+            apiState={apiState}
+            onReload={() => {
+              void loadApiState();
+            }}
+          />
+        ) : null}
 
         <section id="projects" className="panel-grid">
           <div className="panel wide">
@@ -345,6 +382,184 @@ export function App() {
         </section>
       </main>
     </div>
+  );
+}
+
+function WizardPanel({
+  setup,
+  apiState,
+  onReload
+}: {
+  setup: SetupStatus;
+  apiState: "loading" | "ready" | "auth" | "setup" | "error";
+  onReload: () => void;
+}) {
+  const [busy, setBusy] = useState<"admin" | "environment" | "ssh" | null>(null);
+  const canRunProtectedStep = apiState === "ready";
+
+  async function postStep(path: string, step: "environment" | "ssh") {
+    setBusy(step);
+    await fetch(path, {
+      method: "POST",
+      credentials: "include"
+    });
+    setBusy(null);
+    onReload();
+  }
+
+  return (
+    <section className="wizard-panel">
+      <div className="section-heading">
+        <h2>First-Run Setup</h2>
+        <span className="chip muted">Project execution locked until complete</span>
+      </div>
+      <div className="wizard-grid">
+        <div className="wizard-step">
+          <StepHeader number="1" title="Admin Account" status={setup.steps.admin} />
+          {setup.adminConfigured ? (
+            <p>Single admin account is configured.</p>
+          ) : (
+            <CreateAdminForm busy={busy === "admin"} setBusy={setBusy} onReload={onReload} />
+          )}
+        </div>
+
+        <div className="wizard-step">
+          <StepHeader number="2" title="Deployment Environment" status={setup.steps.environment} />
+          <KeyValueList
+            rows={[
+              ["OS", setup.platform.os ?? "Not checked"],
+              ["CPU architecture", setup.platform.arch ?? "Not checked"],
+              ["Data path", setup.installPaths.data ?? "Not checked"],
+              ["Projects path", setup.installPaths.projects ?? "Not checked"]
+            ]}
+          />
+          <button
+            type="button"
+            disabled={!canRunProtectedStep || busy === "environment"}
+            onClick={() => void postStep("/api/setup/environment/verify", "environment")}
+          >
+            {busy === "environment" ? "Checking" : "Verify Environment"}
+          </button>
+          <div className="command-checks">
+            {setup.commandChecks.slice(0, 10).map((check) => (
+              <span className={check.status === "pass" ? "check-pass" : "check-fail"} key={check.id}>
+                {check.command}: {check.status}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="wizard-step">
+          <StepHeader number="3" title="Git SSH Public Key" status={setup.steps.ssh} />
+          <p>Register this public key with your Git host for repository access.</p>
+          <button
+            type="button"
+            disabled={!canRunProtectedStep || busy === "ssh"}
+            onClick={() => void postStep("/api/setup/ssh-key", "ssh")}
+          >
+            {busy === "ssh" ? "Generating" : "Generate Public Key"}
+          </button>
+          {setup.sshPublicKey ? (
+            <pre className="public-key">{setup.sshPublicKey}</pre>
+          ) : (
+            <p className="muted-copy">The private key is stored in app data and is never shown.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StepHeader({
+  number,
+  title,
+  status
+}: {
+  number: string;
+  title: string;
+  status: "pending" | "pass" | "fail";
+}) {
+  return (
+    <div className="step-header">
+      <span>{number}</span>
+      <strong>{title}</strong>
+      <em>{status}</em>
+    </div>
+  );
+}
+
+function CreateAdminForm({
+  busy,
+  setBusy,
+  onReload
+}: {
+  busy: boolean;
+  setBusy: (value: "admin" | "environment" | "ssh" | null) => void;
+  onReload: () => void;
+}) {
+  const [adminId, setAdminId] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitAdmin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy("admin");
+    setError(null);
+    const response = await fetch("/api/setup/admin", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        adminId,
+        password,
+        passwordConfirmation
+      })
+    });
+    setBusy(null);
+    if (!response.ok) {
+      setError("Admin setup failed.");
+      return;
+    }
+    setAdminId("");
+    setPassword("");
+    setPasswordConfirmation("");
+    onReload();
+  }
+
+  return (
+    <form className="settings-form" onSubmit={(event) => void submitAdmin(event)}>
+      <label>
+        <span>Admin ID</span>
+        <input value={adminId} onChange={(event) => setAdminId(event.target.value)} />
+      </label>
+      <label>
+        <span>Password</span>
+        <input
+          autoComplete="new-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </label>
+      <label>
+        <span>Confirm password</span>
+        <input
+          autoComplete="new-password"
+          type="password"
+          value={passwordConfirmation}
+          onChange={(event) => setPasswordConfirmation(event.target.value)}
+        />
+      </label>
+      <div className="form-actions">
+        <button type="submit" disabled={busy}>
+          {busy ? "Creating" : "Create Admin"}
+        </button>
+        <span>{error ?? "Password must be at least 12 characters."}</span>
+      </div>
+    </form>
   );
 }
 
