@@ -12,14 +12,14 @@ coverage/
 !.env.example
 
 # Runtime data
-data/
-projects/
-exports/
-artifacts/
-runs/
-toolchains/
-capabilities/
-secrets/
+/data/
+/projects/
+/exports/
+/artifacts/
+/runs/
+/toolchains/
+/capabilities/
+/secrets/
 
 # Android and generated project sensitive files
 **/keystores/

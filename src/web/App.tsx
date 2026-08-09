@@ -162,6 +162,40 @@ type ToolchainResponse = {
   finishedAt: string | null;
 };
 
+type CapabilityResponse = {
+  status: "not_started" | "running" | "succeeded" | "failed";
+  capabilitiesRoot: string;
+  codexConfigPath: string;
+  requiredCount: number;
+  installedCount: number;
+  missingRequiredCount: number;
+  conflictSummary: string | null;
+  appManagedConfigPresent: boolean;
+  capabilities: Array<{
+    type: "mcp" | "skill" | "agent";
+    id: string;
+    sourceType: "bundled" | "repository" | "user";
+    source: string | null;
+    required: boolean;
+    wiredTo: string[];
+    installStage: "wizard" | "image" | "user";
+    description: string;
+    status: "configured" | "missing" | "optional_disabled" | "conflict";
+    version: string | null;
+    revision: string | null;
+    lastVerifiedAt: string | null;
+  }>;
+  steps: Array<{
+    id: string;
+    label: string;
+    status: "pending" | "pass" | "fail" | "skipped";
+    output: string;
+  }>;
+  artifactPath: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
 type SetupStatus = {
   adminConfigured: boolean;
   setupComplete: boolean;
@@ -258,10 +292,12 @@ export function App() {
   );
   const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
   const [toolchainBusy, setToolchainBusy] = useState(false);
+  const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -296,20 +332,23 @@ export function App() {
         fail2banResponse,
         codexResponse,
         codexDocsResponse,
-        toolchainResponse
+        toolchainResponse,
+        capabilityResponse
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
         fetch("/api/codex/docs", { credentials: "include" }),
-        fetch("/api/toolchain/status", { credentials: "include" })
+        fetch("/api/toolchain/status", { credentials: "include" }),
+        fetch("/api/capabilities/status", { credentials: "include" })
       ]);
       if (
         !settingsResponse.ok ||
         !fail2banResponse.ok ||
         !codexResponse.ok ||
         !codexDocsResponse.ok ||
-        !toolchainResponse.ok
+        !toolchainResponse.ok ||
+        !capabilityResponse.ok
       ) {
         setApiState("error");
         return;
@@ -319,6 +358,7 @@ export function App() {
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
+      setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -376,6 +416,23 @@ export function App() {
     }
   }
 
+  async function runCapabilityInstall() {
+    setCapabilityBusy(true);
+    try {
+      const response = await fetch("/api/capabilities/install", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        setCapabilities((await response.json()) as CapabilityResponse);
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setCapabilityBusy(false);
+    }
+  }
+
   const readiness = useMemo<KeyValueRows>(
     () => [
       ["Authentication", apiState === "ready" ? "Signed in" : statusLabel(apiState)],
@@ -386,8 +443,8 @@ export function App() {
     [apiState]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility, codexDocs, toolchain),
-    [codexCompatibility, codexDocs, toolchain]
+    () => createBuildRows(codexCompatibility, codexDocs, toolchain, capabilities),
+    [codexCompatibility, codexDocs, toolchain, capabilities]
   );
 
   return (
@@ -487,6 +544,13 @@ export function App() {
               <div className="button-row">
                 <button
                   type="button"
+                  disabled={apiState !== "ready" || capabilityBusy}
+                  onClick={() => void runCapabilityInstall()}
+                >
+                  {capabilityBusy ? "Wiring" : "Install Capabilities"}
+                </button>
+                <button
+                  type="button"
                   disabled={apiState !== "ready" || toolchainBusy}
                   onClick={() => void runToolchainInstall()}
                 >
@@ -569,6 +633,7 @@ export function App() {
                 codexCompatibility,
                 codexDocs,
                 toolchain,
+                capabilities,
                 buildEnvironmentRows,
                 apiState
               )}
@@ -766,6 +831,7 @@ function renderSettingsTab(
   codexCompatibility: CodexCompatibilityResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
+  capabilities: CapabilityResponse | null,
   buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error"
 ) {
@@ -822,6 +888,24 @@ function renderSettingsTab(
               ["Error summary", toolchain?.errorSummary ?? "None"]
             ]}
           />
+          <SettingsGroup
+            title="Capability Installer"
+            rows={[
+              ["Install status", capabilities?.status ?? "not_started"],
+              ["Capabilities root", capabilities?.capabilitiesRoot ?? "Unavailable"],
+              ["Codex config", capabilities?.codexConfigPath ?? "Unavailable"],
+              ["App-managed config", boolLabel(capabilities?.appManagedConfigPresent)],
+              ["Required capabilities", `${capabilities?.requiredCount ?? 0}`],
+              ["Configured capabilities", `${capabilities?.installedCount ?? 0}`],
+              ["Missing required", `${capabilities?.missingRequiredCount ?? 0}`],
+              ["Required MCPs", capabilityCountLabel(capabilities, "mcp", true)],
+              ["Bundled worker skills", capabilityCountLabel(capabilities, "skill", true)],
+              ["Bundled review agents", capabilityCountLabel(capabilities, "agent", true)],
+              ["Conflict summary", capabilities?.conflictSummary ?? "None"],
+              ["Install report", capabilities?.artifactPath ?? "Unavailable"]
+            ]}
+          />
+          <CapabilityInventory capabilities={capabilities} />
           <SettingsGroup
             title="Codex Compatibility Review"
             rows={[
@@ -928,7 +1012,8 @@ function renderSettingsTab(
 function createBuildRows(
   codexCompatibility: CodexCompatibilityResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
-  toolchain: ToolchainResponse | null
+  toolchain: ToolchainResponse | null,
+  capabilities: CapabilityResponse | null
 ): KeyValueRows {
   return [
     ["Android SDK", toolchain?.latestSnapshot ? toolchain.latestSnapshot.androidPlatformVersion : "Not installed"],
@@ -937,8 +1022,8 @@ function createBuildRows(
     ["Toolchain snapshots", toolchain?.latestSnapshot ? toolchain.latestSnapshot.snapshotName : "None"],
     ["AVD/emulator", toolchain?.latestSnapshot?.emulatorImage ?? "Not verified"],
     ["Toolchain install", toolchain?.status ?? "not_started"],
-    ["MCP status", "Pending setup"],
-    ["Skill/agent wiring", "Pending setup"],
+    ["MCP status", capabilityTypeLabel(capabilities, "mcp")],
+    ["Skill/agent wiring", `${capabilityTypeLabel(capabilities, "skill")} / ${capabilityTypeLabel(capabilities, "agent")}`],
     ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],
     ["Codex docs index", codexDocsLabel(codexDocs)],
     ["Compatibility review", codexCompatibility?.status ?? "Not run"],
@@ -951,6 +1036,64 @@ function createBuildRows(
         : "None"
     ]
   ];
+}
+
+function CapabilityInventory({ capabilities }: { capabilities: CapabilityResponse | null }) {
+  const rows = (capabilities?.capabilities ?? []).slice(0, 18);
+  return (
+    <div className="settings-stack">
+      <div className="panel-heading">
+        <h3>Capability Inventory</h3>
+        <Workflow size={17} />
+      </div>
+      <div className="mini-table">
+        <div className="mini-row mini-head">
+          <span>Capability</span>
+          <span>Type</span>
+          <span>Stage</span>
+          <span>Status</span>
+        </div>
+        {rows.map((capability) => (
+          <div className="mini-row" key={`${capability.type}:${capability.id}`}>
+            <span>{capability.id}</span>
+            <span>{capability.type}</span>
+            <span>{capability.installStage}</span>
+            <span>{capability.status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function capabilityTypeLabel(
+  capabilities: CapabilityResponse | null,
+  type: "mcp" | "skill" | "agent"
+): string {
+  if (!capabilities) {
+    return "Not wired";
+  }
+  const typed = capabilities.capabilities.filter((capability) => capability.type === type);
+  const configured = typed.filter((capability) => capability.status === "configured").length;
+  const requiredMissing = typed.filter(
+    (capability) => capability.required && capability.status !== "configured"
+  ).length;
+  return requiredMissing > 0 ? `${configured}/${typed.length} configured` : `${configured}/${typed.length} ready`;
+}
+
+function capabilityCountLabel(
+  capabilities: CapabilityResponse | null,
+  type: "mcp" | "skill" | "agent",
+  required: boolean
+): string {
+  if (!capabilities) {
+    return "0";
+  }
+  const matches = capabilities.capabilities.filter(
+    (capability) => capability.type === type && capability.required === required
+  );
+  const configured = matches.filter((capability) => capability.status === "configured").length;
+  return `${configured}/${matches.length}`;
 }
 
 function codexDocsLabel(codexDocs: CodexDocsIndexResponse | null): string {

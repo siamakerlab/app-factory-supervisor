@@ -504,6 +504,30 @@ create table if not exists toolchain_install_runs (
 create index if not exists idx_toolchain_install_runs_started
   on toolchain_install_runs(started_at desc);
 `
+  },
+  {
+    id: "0006_capability_install_runs",
+    description: "Track MCP, skill, and agent capability installer runs",
+    sql: `
+create table if not exists capability_install_runs (
+  id uuid primary key,
+  status text not null check (status in ('not_started', 'running', 'succeeded', 'failed')),
+  config_path text not null,
+  capabilities_root text not null,
+  installed_count integer not null default 0,
+  required_count integer not null default 0,
+  missing_required_count integer not null default 0,
+  conflict_summary text,
+  artifact_id uuid references artifacts(id) on delete set null,
+  steps jsonb not null default '[]'::jsonb,
+  started_at timestamptz not null,
+  finished_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists idx_capability_install_runs_started
+  on capability_install_runs(started_at desc);
+`
   }
 ];
 
@@ -519,6 +543,7 @@ export const expectedMvpTables = [
   "toolchain_snapshots",
   "project_toolchain_snapshots",
   "toolchain_install_runs",
+  "capability_install_runs",
   "runs",
   "jobs",
   "resource_checks",
@@ -554,5 +579,6 @@ export const expectedMvpIndexes = [
   "idx_market_research_project_source",
   "idx_progress_gates_project_status",
   "idx_codex_compatibility_reviews_created",
-  "idx_toolchain_install_runs_started"
+  "idx_toolchain_install_runs_started",
+  "idx_capability_install_runs_started"
 ] as const;

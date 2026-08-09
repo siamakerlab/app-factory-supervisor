@@ -1,5 +1,7 @@
 import { buildServer } from "./app.js";
 import { AuthService } from "./auth/service.js";
+import { registerCapabilityRoutes } from "./capabilities/routes.js";
+import { CapabilityService } from "./capabilities/service.js";
 import { CodexCompatibilityService } from "./codex/compatibility.js";
 import { CodexDocsIndexService } from "./codex/docs.js";
 import { registerCodexRoutes } from "./codex/routes.js";
@@ -25,6 +27,7 @@ const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
 const codexDocsIndexService = new CodexDocsIndexService(database, config);
 const toolchainService = new ToolchainService(database, config);
+const capabilityService = new CapabilityService(database, config);
 const server = await buildServer({
   readiness,
   authService,
@@ -34,6 +37,7 @@ registerFail2banRoutes(server, database);
 registerSetupRoutes(server, setupService);
 registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
 registerToolchainRoutes(server, toolchainService);
+registerCapabilityRoutes(server, capabilityService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);
