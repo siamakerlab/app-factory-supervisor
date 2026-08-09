@@ -801,6 +801,19 @@ export function App() {
     }
   }
 
+  async function logout() {
+    const response = await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include"
+    });
+    if (!response.ok) {
+      setApiState("error");
+      return;
+    }
+    setSession(null);
+    setApiState("auth");
+  }
+
   async function sendTestEmail() {
     const response = await fetch("/api/notifications/test-email", {
       method: "POST",
@@ -1016,7 +1029,12 @@ export function App() {
 
         <div className="sidebar-footer">
           <span>v0.1.0</span>
-          <button type="button" className="logout-button" aria-label="Log out">
+          <button
+            type="button"
+            className="logout-button"
+            aria-label="Log out"
+            onClick={() => void logout()}
+          >
             <LogOut size={17} />
             Log out
           </button>
@@ -1046,6 +1064,14 @@ export function App() {
             setup={setup}
             apiState={apiState}
             onReload={() => {
+              void loadApiState();
+            }}
+          />
+        ) : null}
+
+        {apiState === "auth" ? (
+          <LoginPanel
+            onLoggedIn={() => {
               void loadApiState();
             }}
           />
@@ -1427,6 +1453,69 @@ function StepHeader({
       <strong>{title}</strong>
       <em>{status}</em>
     </div>
+  );
+}
+
+function LoginPanel({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [adminId, setAdminId] = useState("");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"idle" | "submitting" | "error">("idle");
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("submitting");
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        adminId,
+        password
+      })
+    });
+    if (!response.ok) {
+      setStatus("error");
+      return;
+    }
+    setPassword("");
+    setStatus("idle");
+    onLoggedIn();
+  }
+
+  return (
+    <section className="panel login-panel">
+      <div className="panel-heading">
+        <h2>Admin Login</h2>
+        <LockKeyhole size={18} />
+      </div>
+      <form className="settings-form" onSubmit={(event) => void submitLogin(event)}>
+        <label>
+          <span>Admin ID</span>
+          <input
+            autoComplete="username"
+            value={adminId}
+            onChange={(event) => setAdminId(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Password</span>
+          <input
+            autoComplete="current-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        <div className="form-actions">
+          <button type="submit" disabled={status === "submitting"}>
+            {status === "submitting" ? "Signing in" : "Sign in"}
+          </button>
+          <span>{status === "error" ? "Login failed." : "Session required."}</span>
+        </div>
+      </form>
+    </section>
   );
 }
 

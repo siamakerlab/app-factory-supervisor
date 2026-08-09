@@ -161,6 +161,11 @@ button {
   grid-column: span 1;
 }
 
+.login-panel {
+  max-width: 420px;
+  margin-bottom: 14px;
+}
+
 .panel-heading {
   display: flex;
   align-items: center;
