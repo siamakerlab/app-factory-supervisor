@@ -146,6 +146,23 @@ type CodexHookStatusResponse = {
   managedHooks: string[];
 };
 
+type CodexAuthResponse = {
+  authenticated: boolean;
+  codexHomeDir: string;
+  authFilePresent: boolean;
+  login: {
+    id: string;
+    status: "idle" | "starting" | "waiting_for_user" | "succeeded" | "failed" | "cancelled";
+    verificationUri: string | null;
+    userCode: string | null;
+    expiresAt: string | null;
+    startedAt: string;
+    finishedAt: string | null;
+    exitCode: number | null;
+    message: string | null;
+  } | null;
+};
+
 type CodexDocsIndexResponse = {
   status: "not_started" | "indexing" | "ready" | "failed";
   indexName: string;
@@ -532,6 +549,7 @@ export function App() {
   const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
     null
   );
+  const [codexAuth, setCodexAuth] = useState<CodexAuthResponse | null>(null);
   const [codexHooks, setCodexHooks] = useState<CodexHookStatusResponse | null>(null);
   const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
@@ -546,6 +564,7 @@ export function App() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
+  const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [hooksBusy, setHooksBusy] = useState(false);
@@ -566,6 +585,16 @@ export function App() {
       void loadProjectDetail(selectedProjectId);
     }
   }, [apiState, selectedProjectId]);
+
+  useEffect(() => {
+    if (apiState !== "ready" || codexAuth?.login?.status !== "waiting_for_user") {
+      return undefined;
+    }
+    const interval = window.setInterval(() => {
+      void refreshCodexAuth();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [apiState, codexAuth?.login?.status]);
 
   async function loadApiState() {
     try {
@@ -592,6 +621,7 @@ export function App() {
         settingsResponse,
         fail2banResponse,
         isolationResponse,
+        codexAuthResponse,
         codexResponse,
         codexHooksResponse,
         codexDocsResponse,
@@ -605,6 +635,7 @@ export function App() {
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
         fetch("/api/security/isolation", { credentials: "include" }),
+        fetch("/api/codex/auth", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
         fetch("/api/codex/hooks/status", { credentials: "include" }),
         fetch("/api/codex/docs", { credentials: "include" }),
@@ -619,6 +650,7 @@ export function App() {
         !settingsResponse.ok ||
         !fail2banResponse.ok ||
         !isolationResponse.ok ||
+        !codexAuthResponse.ok ||
         !codexResponse.ok ||
         !codexHooksResponse.ok ||
         !codexDocsResponse.ok ||
@@ -635,6 +667,7 @@ export function App() {
       setSettings((await settingsResponse.json()) as PublicSettings);
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
       setSecurityIsolation((await isolationResponse.json()) as SecurityIsolationResponse);
+      setCodexAuth((await codexAuthResponse.json()) as CodexAuthResponse);
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
       setCodexHooks((await codexHooksResponse.json()) as CodexHookStatusResponse);
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
@@ -777,6 +810,55 @@ export function App() {
     }
   }
 
+  async function refreshCodexAuth() {
+    const response = await fetch("/api/codex/auth", {
+      credentials: "include"
+    });
+    if (response.ok) {
+      setCodexAuth((await response.json()) as CodexAuthResponse);
+    }
+  }
+
+  async function startCodexDeviceLogin() {
+    setCodexAuthBusy(true);
+    try {
+      const response = await fetch("/api/codex/auth/device/start", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        const login = (await response.json()) as CodexAuthResponse["login"];
+        setCodexAuth((current) => ({
+          authenticated: current?.authenticated ?? false,
+          authFilePresent: current?.authFilePresent ?? false,
+          codexHomeDir: current?.codexHomeDir ?? "",
+          login
+        }));
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setCodexAuthBusy(false);
+    }
+  }
+
+  async function cancelCodexDeviceLogin() {
+    setCodexAuthBusy(true);
+    try {
+      const response = await fetch("/api/codex/auth/device/cancel", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        await refreshCodexAuth();
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setCodexAuthBusy(false);
+    }
+  }
+
   async function runToolchainInstall() {
     setToolchainBusy(true);
     try {
@@ -854,17 +936,18 @@ export function App() {
   const readiness = useMemo<KeyValueRows>(
     () => [
       ["Authentication", apiState === "ready" ? "Signed in" : statusLabel(apiState)],
+      ["Codex device auth", codexAuth?.authenticated ? "Logged in" : "Not logged in"],
       ["Database", "PostgreSQL migrations enabled"],
       ["Fail2ban", "Auth failure log configured"],
       ["Exports", "ZIP enabled"],
       ["Resources", jobsStatus?.resourceSnapshot.status ?? "Unknown"],
       ["Job runner", `${jobsStatus?.jobs.length ?? 0} recent jobs`]
     ],
-    [apiState, jobsStatus]
+    [apiState, codexAuth, jobsStatus]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility, codexHooks, codexDocs, toolchain, capabilities),
-    [codexCompatibility, codexHooks, codexDocs, toolchain, capabilities]
+    () => createBuildRows(codexCompatibility, codexAuth, codexHooks, codexDocs, toolchain, capabilities),
+    [codexCompatibility, codexAuth, codexHooks, codexDocs, toolchain, capabilities]
   );
 
   return (
@@ -1073,6 +1156,23 @@ export function App() {
                 >
                   {codexReviewBusy ? "Checking" : "Verify Codex"}
                 </button>
+                {codexAuth?.login?.status === "waiting_for_user" ? (
+                  <button
+                    type="button"
+                    disabled={codexAuthBusy}
+                    onClick={() => void cancelCodexDeviceLogin()}
+                  >
+                    {codexAuthBusy ? "Cancelling" : "Cancel Login"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || codexAuthBusy}
+                    onClick={() => void startCodexDeviceLogin()}
+                  >
+                    {codexAuthBusy ? "Starting" : "Login Codex"}
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={apiState !== "ready" || hooksBusy}
@@ -1082,6 +1182,7 @@ export function App() {
                 </button>
               </div>
             </div>
+            <CodexDeviceLoginPanel codexAuth={codexAuth} />
             <KeyValueList rows={buildEnvironmentRows} />
           </div>
 
@@ -1166,6 +1267,7 @@ export function App() {
                 fail2ban,
                 securityIsolation,
                 codexCompatibility,
+                codexAuth,
                 codexHooks,
                 codexDocs,
                 toolchain,
@@ -1841,6 +1943,7 @@ function renderSettingsTab(
   fail2ban: Fail2banResponse | null,
   securityIsolation: SecurityIsolationResponse | null,
   codexCompatibility: CodexCompatibilityResponse | null,
+  codexAuth: CodexAuthResponse | null,
   codexHooks: CodexHookStatusResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
@@ -1933,6 +2036,13 @@ function renderSettingsTab(
               ["Review status", codexCompatibility?.status ?? "not_run"],
               ["Build environment ready", boolLabel(codexCompatibility?.buildEnvironmentReady)],
               ["Codex CLI version", codexCompatibility?.codexCliVersion ?? "Unknown"],
+              ["Codex device auth", codexAuth?.authenticated ? "Logged in" : "Not logged in"],
+              ["Codex auth file", codexAuth?.authFilePresent ? "Present" : "Missing"],
+              ["Codex auth home", codexAuth?.codexHomeDir ?? "Unavailable"],
+              ["Device login status", codexAuth?.login?.status ?? "idle"],
+              ["Device code", codexAuth?.login?.userCode ?? "Not started"],
+              ["Verification URL", codexAuth?.login?.verificationUri ?? "Not started"],
+              ["Login message", codexAuth?.login?.message ?? "No active login"],
               ["JSON mode", boolLabel(codexCompatibility?.jsonModeSupported)],
               ["Output schema", boolLabel(codexCompatibility?.outputSchemaSupported)],
               ["Output last message", boolLabel(codexCompatibility?.outputLastMessageSupported)],
@@ -2105,6 +2215,7 @@ function renderSettingsTab(
 
 function createBuildRows(
   codexCompatibility: CodexCompatibilityResponse | null,
+  codexAuth: CodexAuthResponse | null,
   codexHooks: CodexHookStatusResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
@@ -2126,7 +2237,10 @@ function createBuildRows(
     ["MCP status", capabilityTypeLabel(capabilities, "mcp")],
     ["Skill/agent wiring", `${capabilityTypeLabel(capabilities, "skill")} / ${capabilityTypeLabel(capabilities, "agent")}`],
     ["Codex CLI version", codexCompatibility?.codexCliVersion ?? codexHooks?.codexCliVersion ?? "Unknown"],
-    ["Codex auth", boolLabel(codexCompatibility?.codexAuthUsable)],
+    ["Codex device auth", codexAuth?.authenticated ? "Logged in" : "Not logged in"],
+    ["Codex auth file", codexAuth?.authFilePresent ? "Present" : "Missing"],
+    ["Device login", codexAuth?.login?.status ?? "idle"],
+    ["Compatibility auth smoke", boolLabel(codexCompatibility?.codexAuthUsable)],
     ["Codex JSONL dry-run", boolLabel(codexCompatibility?.jsonModeSupported && codexCompatibility.outputLastMessageSupported)],
     ["App-server TS schema", boolLabel(codexCompatibility?.appServerTypeScriptSchemasGenerated)],
     ["App-server JSON schema", boolLabel(codexCompatibility?.appServerJsonSchemasGenerated)],
@@ -2237,6 +2351,41 @@ function ProjectExportTable({ exports }: { exports: ProjectExportSummary[] }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function CodexDeviceLoginPanel({ codexAuth }: { codexAuth: CodexAuthResponse | null }) {
+  const login = codexAuth?.login;
+  if (!login || !["starting", "waiting_for_user", "failed", "cancelled"].includes(login.status)) {
+    return null;
+  }
+
+  return (
+    <div className="device-login-panel">
+      <div>
+        <span>Codex device login</span>
+        <strong>{login.status}</strong>
+      </div>
+      <div>
+        <span>Device code</span>
+        <strong>{login.userCode ?? "Waiting for code"}</strong>
+      </div>
+      <div>
+        <span>Verification URL</span>
+        {login.verificationUri ? (
+          <a href={login.verificationUri} target="_blank" rel="noreferrer">
+            {login.verificationUri}
+          </a>
+        ) : (
+          <strong>Waiting for URL</strong>
+        )}
+      </div>
+      <div>
+        <span>Expires</span>
+        <strong>{login.expiresAt ?? "Unknown"}</strong>
+      </div>
+      <p>{login.message ?? "No message"}</p>
     </div>
   );
 }

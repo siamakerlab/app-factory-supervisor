@@ -192,6 +192,43 @@ button {
   gap: 8px;
 }
 
+.device-login-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #cbd4df;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.device-login-panel div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+  font-size: 13px;
+}
+
+.device-login-panel span {
+  color: #5f6e7d;
+}
+
+.device-login-panel strong,
+.device-login-panel a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #1d2935;
+  font-weight: 700;
+}
+
+.device-login-panel p {
+  margin: 2px 0 0;
+  color: #59697a;
+  font-size: 12px;
+}
+
 .table {
   display: grid;
   border: 1px solid #d8e0e8;
