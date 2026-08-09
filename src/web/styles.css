@@ -416,6 +416,148 @@ button {
   background: #edf1f5;
 }
 
+.chip.danger {
+  color: #8f1d1d;
+  background: #fee2e2;
+}
+
+.setup-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 52%);
+}
+
+.setup-dialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #cbd4df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 32%);
+}
+
+.setup-dialog .panel-heading {
+  align-items: flex-start;
+}
+
+.setup-dialog .panel-heading p {
+  margin: 5px 0 0;
+}
+
+.setup-step-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.setup-step > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #526173;
+  background: #e2e8f0;
+  font-weight: 700;
+}
+
+.setup-step strong {
+  display: block;
+  font-size: 13px;
+}
+
+.setup-step p {
+  margin: 3px 0 0;
+  color: #5f6e7d;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.setup-step em {
+  color: #607082;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.setup-step.running {
+  border-color: #7fb8ff;
+  background: #eff6ff;
+}
+
+.setup-step.pass {
+  border-color: #9ed8c0;
+  background: #ecfdf5;
+}
+
+.setup-step.fail {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.setup-step.running > span {
+  color: #0f4f8f;
+  background: #bfdbfe;
+}
+
+.setup-step.pass > span {
+  color: #176c45;
+  background: #bbf7d0;
+}
+
+.setup-step.fail > span {
+  color: #8f1d1d;
+  background: #fecaca;
+}
+
+.setup-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-dialog-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #ffffff;
+  border-color: #176c64;
+  background: #218b82;
+}
+
+.setup-dialog-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.setup-dialog-actions span {
+  color: #5f6e7d;
+  font-size: 12px;
+}
+
 .kv-list,
 .readiness-grid {
   display: grid;

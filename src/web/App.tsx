@@ -570,6 +570,8 @@ export function App() {
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [hooksBusy, setHooksBusy] = useState(false);
+  const [setupStepBusy, setSetupStepBusy] = useState(false);
+  const [setupInstallPhase, setSetupInstallPhase] = useState<string | null>(null);
   const [runBusyProjectId, setRunBusyProjectId] = useState<string | null>(null);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
@@ -598,6 +600,17 @@ export function App() {
     }, 5000);
     return () => window.clearInterval(interval);
   }, [apiState, codexAuth?.login?.status]);
+
+  useEffect(() => {
+    const installing = toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy;
+    if (apiState !== "ready" || !installing) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => {
+      void refreshSetupProgress();
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [apiState, toolchainBusy, capabilityBusy, codexDocsBusy, hooksBusy, setupStepBusy]);
 
   async function loadApiState() {
     try {
@@ -704,6 +717,37 @@ export function App() {
     const status = (await response.json()) as SetupStatus;
     setSetup(status);
     return status;
+  }
+
+  async function refreshSetupProgress() {
+    const [
+      setupResponse,
+      toolchainResponse,
+      capabilityResponse,
+      codexDocsResponse,
+      codexHooksResponse
+    ] = await Promise.all([
+      fetch("/api/setup/status", { credentials: "include" }),
+      fetch("/api/toolchain/status", { credentials: "include" }),
+      fetch("/api/capabilities/status", { credentials: "include" }),
+      fetch("/api/codex/docs", { credentials: "include" }),
+      fetch("/api/codex/hooks/status", { credentials: "include" })
+    ]);
+    if (setupResponse.ok) {
+      setSetup((await setupResponse.json()) as SetupStatus);
+    }
+    if (toolchainResponse.ok) {
+      setToolchain((await toolchainResponse.json()) as ToolchainResponse);
+    }
+    if (capabilityResponse.ok) {
+      setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
+    }
+    if (codexDocsResponse.ok) {
+      setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
+    }
+    if (codexHooksResponse.ok) {
+      setCodexHooks((await codexHooksResponse.json()) as CodexHookStatusResponse);
+    }
   }
 
   async function loadProjectDetail(projectId: string) {
@@ -965,10 +1009,26 @@ export function App() {
   }
 
   async function runFirstRunEnvironmentInstall() {
+    setSetupStepBusy(true);
     setToolchainBusy(true);
     setCapabilityBusy(true);
     setCodexDocsBusy(true);
+    setHooksBusy(true);
+    setSetupInstallPhase("Preparing SSH access");
     try {
+      if (setup?.steps.ssh !== "pass") {
+        const sshResponse = await fetch("/api/setup/ssh-key", {
+          method: "POST",
+          credentials: "include"
+        });
+        if (!sshResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        setSetup((await sshResponse.json()) as SetupStatus);
+      }
+
+      setSetupInstallPhase("Installing Android build toolchain");
       const toolchainResponse = await fetch("/api/toolchain/install", {
         method: "POST",
         credentials: "include"
@@ -979,6 +1039,7 @@ export function App() {
       }
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
 
+      setSetupInstallPhase("Installing MCP, skills, and agents");
       const capabilityResponse = await fetch("/api/capabilities/install", {
         method: "POST",
         credentials: "include"
@@ -989,6 +1050,7 @@ export function App() {
       }
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
 
+      setSetupInstallPhase("Indexing Codex documentation");
       const docsResponse = await fetch("/api/codex/docs/index", {
         method: "POST",
         credentials: "include"
@@ -1004,6 +1066,22 @@ export function App() {
         return;
       }
 
+      setSetupInstallPhase("Installing Codex worker hooks");
+      const hooksResponse = await fetch("/api/codex/hooks/install", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ force: false })
+      });
+      if (!hooksResponse.ok) {
+        setApiState("error");
+        return;
+      }
+      setCodexHooks((await hooksResponse.json()) as CodexHookStatusResponse);
+
+      setSetupInstallPhase("Verifying setup readiness");
       const setupResponse = await fetch("/api/setup/environment/verify", {
         method: "POST",
         credentials: "include"
@@ -1014,6 +1092,9 @@ export function App() {
       }
       setSetup((await setupResponse.json()) as SetupStatus);
     } finally {
+      setSetupInstallPhase(null);
+      setSetupStepBusy(false);
+      setHooksBusy(false);
       setCodexDocsBusy(false);
       setCapabilityBusy(false);
       setToolchainBusy(false);
@@ -1232,6 +1313,19 @@ export function App() {
           </div>
         </header>
 
+        {apiState === "ready" && setup && !setup.setupComplete ? (
+          <FirstRunSetupDialog
+            setup={setup}
+            toolchain={toolchain}
+            capabilities={capabilities}
+            codexDocs={codexDocs}
+            codexHooks={codexHooks}
+            installBusy={toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy}
+            installPhase={setupInstallPhase}
+            onRunSetup={() => void runFirstRunEnvironmentInstall()}
+          />
+        ) : null}
+
         {currentPage === "build" && setup && !setup.setupComplete ? (
           <WizardPanel
             setup={setup}
@@ -1251,7 +1345,7 @@ export function App() {
                 <h2>Project Queue</h2>
                 <button
                   type="button"
-                  disabled={apiState !== "ready"}
+                  disabled={apiState !== "ready" || !setup?.setupComplete}
                   onClick={() => setProjectWizardOpen((value) => !value)}
                 >
                   {projectWizardOpen ? "Close" : "New Project"}
@@ -1642,6 +1736,79 @@ function StepHeader({
       <span>{number}</span>
       <strong>{title}</strong>
       <em>{status}</em>
+    </div>
+  );
+}
+
+function FirstRunSetupDialog({
+  setup,
+  toolchain,
+  capabilities,
+  codexDocs,
+  codexHooks,
+  installBusy,
+  installPhase,
+  onRunSetup
+}: {
+  setup: SetupStatus;
+  toolchain: ToolchainResponse | null;
+  capabilities: CapabilityResponse | null;
+  codexDocs: CodexDocsIndexResponse | null;
+  codexHooks: CodexHookStatusResponse | null;
+  installBusy: boolean;
+  installPhase: string | null;
+  onRunSetup: () => void;
+}) {
+  const steps = createFirstRunSteps(setup, toolchain, capabilities, codexDocs, codexHooks);
+  const completed = steps.filter((step) => step.status === "pass").length;
+  const failed = steps.some((step) => step.status === "fail");
+  const progress = Math.round((completed / steps.length) * 100);
+
+  return (
+    <div className="setup-dialog-backdrop" role="presentation">
+      <section className="setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-dialog-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="setup-dialog-title">First-Run Setup</h2>
+            <p className="muted-copy">
+              Finish the required environment setup before creating Android/Kotlin projects.
+            </p>
+          </div>
+          <span className={failed ? "chip danger" : "chip muted"}>{installBusy ? "Installing" : `${progress}%`}</span>
+        </div>
+
+        <div className="progress-header">
+          <span>{installPhase ?? (failed ? "Action required" : "Ready to install")}</span>
+          <strong>{progress}%</strong>
+        </div>
+        <span className="progress-track large">
+          <span style={{ width: `${progress}%` }} />
+        </span>
+
+        <ol className="setup-step-list">
+          {steps.map((step, index) => (
+            <li className={`setup-step ${step.status}`} key={step.id}>
+              <span>{index + 1}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <p>{step.detail}</p>
+              </div>
+              <em>{step.status}</em>
+            </li>
+          ))}
+        </ol>
+
+        <div className="setup-dialog-actions">
+          <button type="button" disabled={installBusy} onClick={onRunSetup}>
+            {installBusy ? "Installing" : failed ? "Retry Setup" : "Start Setup"}
+          </button>
+          <span>
+            {setup.setupComplete
+              ? "Project creation is available."
+              : "Project creation is locked until every required setup step passes."}
+          </span>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2324,6 +2491,119 @@ function projectProgress(project: ProjectSummary): number {
     "production ready": 100
   };
   return phaseWeights[project.currentPhase] ?? 0;
+}
+
+type SetupDisplayStep = {
+  id: string;
+  label: string;
+  detail: string;
+  status: "pending" | "running" | "pass" | "fail";
+};
+
+function createFirstRunSteps(
+  setup: SetupStatus,
+  toolchain: ToolchainResponse | null,
+  capabilities: CapabilityResponse | null,
+  codexDocs: CodexDocsIndexResponse | null,
+  codexHooks: CodexHookStatusResponse | null
+): SetupDisplayStep[] {
+  const hookStatus =
+    codexHooks?.conflicts && codexHooks.conflicts.length > 0
+      ? "fail"
+      : codexHooks?.configOwner === "app" && codexHooks.hooksOwner === "app"
+        ? "pass"
+        : "pending";
+  return [
+    {
+      id: "admin",
+      label: "Admin account",
+      detail: setup.adminConfigured ? "Single admin account is configured." : "Create the first admin account.",
+      status: setupStepStatus(setup.steps.admin)
+    },
+    {
+      id: "ssh",
+      label: "Git SSH key",
+      detail: setup.sshPublicKeyPath ?? "Generate a deploy key for repository access.",
+      status: setupStepStatus(setup.steps.ssh)
+    },
+    {
+      id: "toolchain",
+      label: "Android build toolchain",
+      detail:
+        toolchain?.errorSummary ??
+        runningStepLabel(toolchain?.steps) ??
+        toolchain?.latestSnapshot?.snapshotName ??
+        "Install Android SDK, Gradle, Java, emulator, image tools, and keystore tools.",
+      status: installStatus(toolchain?.status)
+    },
+    {
+      id: "capabilities",
+      label: "MCP, skills, and agents",
+      detail: capabilities
+        ? `${capabilities.installedCount}/${capabilities.requiredCount} required capabilities configured.`
+        : "Install and wire required Android development capabilities.",
+      status: installStatus(capabilities?.status)
+    },
+    {
+      id: "docs",
+      label: "Codex docs index",
+      detail: codexDocs
+        ? `${codexDocs.documentCount} documents, ${codexDocs.uniqueUrlCount} URLs indexed.`
+        : "Index Codex usage, JSON mode, hooks, and compatibility documentation.",
+      status: docsStatus(codexDocs?.status)
+    },
+    {
+      id: "hooks",
+      label: "Codex worker hooks",
+      detail:
+        codexHooks?.conflicts && codexHooks.conflicts.length > 0
+          ? codexHooks.conflicts.join(", ")
+          : "Install app-managed stop/session hooks for worker completion detection.",
+      status: hookStatus
+    },
+    {
+      id: "verify",
+      label: "Environment verification",
+      detail: setup.lastError ?? "Verify all required commands before project creation is unlocked.",
+      status: setupStepStatus(setup.steps.environment)
+    }
+  ];
+}
+
+function setupStepStatus(status: SetupStatus["steps"][keyof SetupStatus["steps"]]): SetupDisplayStep["status"] {
+  return status === "pass" ? "pass" : status === "fail" ? "fail" : "pending";
+}
+
+function installStatus(status: "not_started" | "running" | "succeeded" | "failed" | undefined): SetupDisplayStep["status"] {
+  if (status === "succeeded") {
+    return "pass";
+  }
+  if (status === "failed") {
+    return "fail";
+  }
+  if (status === "running") {
+    return "running";
+  }
+  return "pending";
+}
+
+function docsStatus(
+  status: "not_started" | "indexing" | "ready" | "failed" | undefined
+): SetupDisplayStep["status"] {
+  if (status === "ready") {
+    return "pass";
+  }
+  if (status === "failed") {
+    return "fail";
+  }
+  if (status === "indexing") {
+    return "running";
+  }
+  return "pending";
+}
+
+function runningStepLabel(steps: Array<{ label: string; status: string }> | undefined): string | null {
+  return steps?.find((step) => step.status === "running")?.label ?? null;
 }
 
 function versionTitle(project: ProjectSummary): string {
