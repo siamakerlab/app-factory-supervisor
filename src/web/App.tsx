@@ -944,6 +944,63 @@ export function App() {
     }
   }
 
+  async function runFirstRunEnvironmentInstall() {
+    setToolchainBusy(true);
+    setCapabilityBusy(true);
+    setCodexDocsBusy(true);
+    try {
+      const toolchainResponse = await fetch("/api/toolchain/install", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!toolchainResponse.ok) {
+        setApiState("error");
+        return;
+      }
+      setToolchain((await toolchainResponse.json()) as ToolchainResponse);
+
+      const capabilityResponse = await fetch("/api/capabilities/install", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!capabilityResponse.ok) {
+        setApiState("error");
+        return;
+      }
+      setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
+
+      const docsResponse = await fetch("/api/codex/docs/index", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!docsResponse.ok) {
+        setApiState("error");
+        return;
+      }
+      const docsIndex = (await docsResponse.json()) as CodexDocsIndexResponse;
+      setCodexDocs(docsIndex);
+      if (docsIndex.status !== "ready") {
+        setApiState("error");
+        return;
+      }
+
+      const setupResponse = await fetch("/api/setup/environment/verify", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!setupResponse.ok) {
+        setApiState("error");
+        return;
+      }
+      setSetup((await setupResponse.json()) as SetupStatus);
+    } finally {
+      setCodexDocsBusy(false);
+      setCapabilityBusy(false);
+      setToolchainBusy(false);
+      await loadApiState();
+    }
+  }
+
   async function installManagedHooks() {
     setHooksBusy(true);
     try {
@@ -1063,6 +1120,8 @@ export function App() {
           <WizardPanel
             setup={setup}
             apiState={apiState}
+            installBusy={toolchainBusy || capabilityBusy || codexDocsBusy}
+            onInstallEnvironment={() => void runFirstRunEnvironmentInstall()}
             onReload={() => {
               void loadApiState();
             }}
@@ -1357,10 +1416,14 @@ export function App() {
 function WizardPanel({
   setup,
   apiState,
+  installBusy,
+  onInstallEnvironment,
   onReload
 }: {
   setup: SetupStatus;
   apiState: "loading" | "ready" | "auth" | "setup" | "error";
+  installBusy: boolean;
+  onInstallEnvironment: () => void;
   onReload: () => void;
 }) {
   const [busy, setBusy] = useState<"admin" | "environment" | "ssh" | null>(null);
@@ -1404,10 +1467,10 @@ function WizardPanel({
           />
           <button
             type="button"
-            disabled={!canRunProtectedStep || busy === "environment"}
-            onClick={() => void postStep("/api/setup/environment/verify", "environment")}
+            disabled={!canRunProtectedStep || busy === "environment" || installBusy}
+            onClick={onInstallEnvironment}
           >
-            {busy === "environment" ? "Checking" : "Verify Environment"}
+            {installBusy || busy === "environment" ? "Installing" : "Install and Verify"}
           </button>
           <div className="command-checks">
             {setup.commandChecks.slice(0, 10).map((check) => (

@@ -28,8 +28,9 @@ ENV PATH=/app/data/toolchains/android-sdk/platform-tools:/app/data/toolchains/an
 
 COPY package.json package-lock.json ./
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends zip \
+  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client python3 unzip zip \
   && rm -rf /var/lib/apt/lists/* \
+  && npm install -g @openai/codex@0.147.0 \
   && npm ci --omit=dev \
   && npm cache clean --force
 

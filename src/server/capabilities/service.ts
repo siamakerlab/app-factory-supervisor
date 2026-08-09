@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -92,13 +93,40 @@ const managedEnd = "# <<< app-factory-supervisor managed capabilities";
 export const defaultCapabilities: CapabilityDefinition[] = [
   mcp("mobile-docs", "repository", "https://github.com/siamakerlab/mobile-docs-mcp-server", true, {
     command: "docs-mcp-server",
-    args: []
+    args: ["--protocol", "stdio"],
+    npmPackage: "mobile-docs-mcp",
+    packageVersion: "0.2.0"
   }),
-  mcp("context7", "repository", "https://github.com/upstash/context7", true),
-  mcp("mobile-mcp", "repository", "https://github.com/mobile-next/mobile-mcp", true),
-  mcp("playwright", "repository", "https://github.com/microsoft/playwright-mcp", true),
-  mcp("memory", "repository", "https://github.com/modelcontextprotocol/servers/tree/main/src/memory", true),
-  mcp("time", "repository", "https://github.com/modelcontextprotocol/servers/tree/main/src/time", true),
+  mcp("context7", "repository", "https://github.com/upstash/context7", true, {
+    command: "context7-mcp",
+    args: [],
+    npmPackage: "@upstash/context7-mcp",
+    packageVersion: "4.0.0"
+  }),
+  mcp("mobile-mcp", "repository", "https://github.com/mobile-next/mobile-mcp", true, {
+    command: "mcp-server-mobile",
+    args: [],
+    npmPackage: "@mobilenext/mobile-mcp",
+    packageVersion: "1.0.2"
+  }),
+  mcp("playwright", "repository", "https://github.com/microsoft/playwright-mcp", true, {
+    command: "playwright-mcp",
+    args: [],
+    npmPackage: "@playwright/mcp",
+    packageVersion: "0.0.79"
+  }),
+  mcp("memory", "repository", "https://github.com/modelcontextprotocol/servers/tree/main/src/memory", true, {
+    command: "mcp-server-memory",
+    args: [],
+    npmPackage: "@modelcontextprotocol/server-memory",
+    packageVersion: "2026.7.4"
+  }),
+  mcp("time", "repository", "https://github.com/guanxiong-shen/mcp-server-time", true, {
+    command: "mcp-server-time",
+    args: [],
+    npmPackage: "@guanxiong/mcp-server-time",
+    packageVersion: "1.0.0"
+  }),
   mcp("github", "repository", "https://github.com/github/github-mcp-server", false, undefined, [
     "credentials-required"
   ]),
@@ -244,6 +272,7 @@ export class CapabilityService {
 
     for (const [id, fn] of [
       ["write-capability-records", () => this.writeCapabilityRecords()],
+      ["install-required-mcps", () => this.installRequiredMcps()],
       ["wire-bundled-capabilities", () => this.wireBundledCapabilities(paths)],
       ["write-codex-config", () => this.writeCodexConfig(paths)],
       ["validate-capabilities", () => this.validateCapabilities()]
@@ -360,6 +389,44 @@ export class CapabilityService {
     return `Prepared ${bundled.length} bundled skill/agent manifests without overwriting existing files.`;
   }
 
+  private async installRequiredMcps(): Promise<string> {
+    const installable = defaultCapabilities.filter(
+      (capability) =>
+        capability.type === "mcp" &&
+        capability.required &&
+        typeof capability.metadata?.config === "object" &&
+        capability.metadata.config !== null &&
+        "npmPackage" in capability.metadata.config
+    );
+    const outputs: string[] = [];
+    for (const capability of installable) {
+      const config = getMcpCommandConfig(capability);
+      if (!config.npmPackage || !config.packageVersion) {
+        continue;
+      }
+      const spec = `${config.npmPackage}@${config.packageVersion}`;
+      const install = await runCommand("npm", ["install", "-g", spec], 10 * 60 * 1000);
+      if (install.exitCode !== 0) {
+        await this.markCapabilityStatus(capability, "missing", install.output || `npm install -g ${spec} failed`);
+        throw new Error(`Failed to install ${capability.id}: ${install.output || install.error}`);
+      }
+      const version = await runCommand(config.command, ["--version"], 30_000);
+      if (version.exitCode !== 0) {
+        await this.markCapabilityStatus(
+          capability,
+          "missing",
+          version.output || `${config.command} --version failed`
+        );
+        throw new Error(`Installed ${capability.id}, but ${config.command} is not executable.`);
+      }
+      await this.markCapabilityStatus(capability, "configured", null, {
+        version: firstLine(version.output) || config.packageVersion
+      });
+      outputs.push(`${capability.id}: ${spec} (${config.command})`);
+    }
+    return outputs.length > 0 ? `Installed required MCP packages: ${outputs.join(", ")}.` : "No MCP packages to install.";
+  }
+
   private async writeCodexConfig(paths: ReturnType<CapabilityService["getPaths"]>): Promise<string> {
     const existing = await readTextIfExists(paths.configPath);
     const unmanagedConflict =
@@ -409,6 +476,34 @@ export class CapabilityService {
         where metadata->>'required' = 'true'
       `,
       [JSON.stringify({ conflictSummary: summary })]
+    );
+  }
+
+  private async markCapabilityStatus(
+    capability: CapabilityDefinition,
+    status: CapabilityStatus,
+    error: string | null,
+    input: { version?: string | null; revision?: string | null } = {}
+  ): Promise<void> {
+    await this.database.pool.query(
+      `
+        update capability_installations
+        set status = $3,
+            version = coalesce($4, version),
+            revision = coalesce($5, revision),
+            metadata = metadata || $6::jsonb,
+            last_verified_at = now()
+        where capability_type = $1
+          and capability_id = $2
+      `,
+      [
+        capability.type,
+        capability.id,
+        status,
+        input.version ?? null,
+        input.revision ?? null,
+        JSON.stringify(error ? { lastInstallError: error } : { lastInstallError: null })
+      ]
     );
   }
 
@@ -600,6 +695,7 @@ function mergeDefinitions(rows: CapabilityRow[]): CapabilityRecord[] {
 function createSteps(): CapabilityInstallStep[] {
   return [
     step("write-capability-records", "Register default capability records"),
+    step("install-required-mcps", "Install required MCP server packages"),
     step("wire-bundled-capabilities", "Copy or prepare bundled skills and agents"),
     step("write-codex-config", "Write app-managed Codex MCP config"),
     step("validate-capabilities", "Validate required capability readiness")
@@ -635,15 +731,7 @@ function renderManagedConfig(capabilities: CapabilityDefinition[]): string {
 }
 
 function renderMcpConfig(capability: CapabilityDefinition): string {
-  const config = capability.metadata?.config;
-  const command =
-    typeof config === "object" && config && "command" in config && typeof config.command === "string"
-      ? config.command
-      : capability.id;
-  const args =
-    typeof config === "object" && config && "args" in config && Array.isArray(config.args)
-      ? config.args.filter((arg): arg is string => typeof arg === "string")
-      : [];
+  const { command, args } = getMcpCommandConfig(capability);
   return [
     "",
     `[mcp_servers.${JSON.stringify(capability.id)}]`,
@@ -653,6 +741,83 @@ function renderMcpConfig(capability: CapabilityDefinition): string {
     "startup_timeout_sec = 30",
     "tool_timeout_sec = 120"
   ].join("\n");
+}
+
+function getMcpCommandConfig(capability: CapabilityDefinition): {
+  command: string;
+  args: string[];
+  npmPackage: string | null;
+  packageVersion: string | null;
+} {
+  const config = capability.metadata?.config;
+  return {
+    command:
+      typeof config === "object" && config && "command" in config && typeof config.command === "string"
+        ? config.command
+        : capability.id,
+    args:
+      typeof config === "object" && config && "args" in config && Array.isArray(config.args)
+        ? config.args.filter((arg): arg is string => typeof arg === "string")
+        : [],
+    npmPackage:
+      typeof config === "object" && config && "npmPackage" in config && typeof config.npmPackage === "string"
+        ? config.npmPackage
+        : null,
+    packageVersion:
+      typeof config === "object" &&
+      config &&
+      "packageVersion" in config &&
+      typeof config.packageVersion === "string"
+        ? config.packageVersion
+        : null
+  };
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  timeoutMs: number
+): Promise<{ exitCode: number | null; output: string; error: string | null }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve({
+        exitCode: null,
+        output: Buffer.concat(chunks).toString("utf8").trim(),
+        error: `${command} timed out`
+      });
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: null,
+        output: Buffer.concat(chunks).toString("utf8").trim(),
+        error: error.message
+      });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: code,
+        output: Buffer.concat(chunks).toString("utf8").trim(),
+        error: null
+      });
+    });
+  });
+}
+
+function firstLine(value: string): string | null {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? null;
 }
 
 function replaceManagedSection(existing: string, managed: string): string {

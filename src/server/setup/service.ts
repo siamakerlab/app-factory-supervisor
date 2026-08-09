@@ -51,6 +51,11 @@ type SetupRow = {
 const commandChecks: CommandCheckDefinition[] = [
   { id: "codex", command: "codex", args: ["--version"], required: true },
   { id: "docs-mcp-server", command: "docs-mcp-server", args: ["--version"], required: true },
+  { id: "context7-mcp", command: "context7-mcp", args: ["--version"], required: true },
+  { id: "mcp-server-mobile", command: "mcp-server-mobile", args: ["--version"], required: true },
+  { id: "playwright-mcp", command: "playwright-mcp", args: ["--version"], required: true },
+  { id: "mcp-server-memory", command: "mcp-server-memory", args: ["--version"], required: true },
+  { id: "mcp-server-time", command: "mcp-server-time", args: ["--version"], required: true },
   { id: "git", command: "git", args: ["--version"], required: true },
   { id: "node", command: "node", args: ["--version"], required: true },
   { id: "python3", command: "python3", args: ["--version"], required: true },
