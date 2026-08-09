@@ -192,6 +192,10 @@ button {
   gap: 8px;
 }
 
+.compact-actions {
+  gap: 6px;
+}
+
 .device-login-panel {
   display: grid;
   gap: 8px;

@@ -39,7 +39,7 @@ export class CodexAuthService {
   constructor(private readonly config: AppConfig) {}
 
   async getStatus(): Promise<CodexAuthStatus> {
-    this.refreshLoginStatus();
+    await this.refreshLoginStatus();
     const paths = getRuntimePaths(this.config);
     return {
       authenticated: await this.isAuthenticated(),
@@ -50,7 +50,7 @@ export class CodexAuthService {
   }
 
   async startDeviceLogin(): Promise<CodexDeviceLoginSession> {
-    this.refreshLoginStatus();
+    await this.refreshLoginStatus();
     if (this.loginSession && ["starting", "waiting_for_user"].includes(this.loginSession.status)) {
       return this.publicLoginSession()!;
     }
@@ -136,12 +136,12 @@ export class CodexAuthService {
     return this.publicLoginSession();
   }
 
-  private refreshLoginStatus(): void {
+  private async refreshLoginStatus(): Promise<void> {
     const session = this.loginSession;
     if (!session || session.status !== "waiting_for_user") {
       return;
     }
-    if (existsSync(this.authFilePath())) {
+    if (await this.isAuthenticated()) {
       session.status = "succeeded";
       session.finishedAt = new Date().toISOString();
       session.message = "Codex login completed.";

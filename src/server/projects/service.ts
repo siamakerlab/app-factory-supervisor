@@ -518,6 +518,55 @@ export class ProjectService {
     };
   }
 
+  async startProjectRun(projectId: string): Promise<ProjectDetail | null> {
+    const project = await this.getProject(projectId);
+    if (!project) {
+      return null;
+    }
+    await this.database.pool.query(
+      `
+        update projects
+        set status = 'running',
+            started_at = coalesce(started_at, now()),
+            completed_at = null,
+            updated_at = now()
+        where id = $1
+      `,
+      [projectId]
+    );
+    return this.getProjectDetail(projectId);
+  }
+
+  async recordSupervisorPrompt(
+    projectId: string,
+    prompt: string,
+    metadata: Record<string, unknown> = {}
+  ): Promise<void> {
+    const iterationResult = await this.database.pool.query<{ iteration: number }>(
+      `
+        select coalesce(max(iteration), 0) + 1 as iteration
+        from timeline_events
+        where project_id = $1 and event_type = 'supervisor_prompt_sent'
+      `,
+      [projectId]
+    );
+    await this.database.pool.query(
+      `
+        insert into timeline_events (
+          id, project_id, iteration, event_type, title, body, metadata, created_at
+        )
+        values ($1, $2, $3, 'supervisor_prompt_sent', 'Supervisor prompt sent', $4, $5, now())
+      `,
+      [
+        randomUUID(),
+        projectId,
+        iterationResult.rows[0]?.iteration ?? 1,
+        prompt,
+        JSON.stringify(metadata)
+      ]
+    );
+  }
+
   async updateChecklistItem(
     projectId: string,
     itemKey: string,

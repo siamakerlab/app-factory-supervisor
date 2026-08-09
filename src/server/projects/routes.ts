@@ -122,10 +122,12 @@ export function registerProjectRoutes(
             priority: 10
           })
         : null;
+      const startedProject = await projectService.startProjectRun(request.params.projectId);
       return reply.code(201).send({
         projectId: request.params.projectId,
         job,
-        nextPrompt
+        nextPrompt,
+        project: startedProject ?? project
       });
     }
   );

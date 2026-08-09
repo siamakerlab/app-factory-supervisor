@@ -65,6 +65,7 @@ export type JobSummary = {
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;
+  metadata: Record<string, unknown>;
 };
 
 export type JobHandlerResult = {
@@ -93,6 +94,7 @@ type JobRow = {
   started_at: Date | null;
   finished_at: Date | null;
   error_summary: string | null;
+  metadata: Record<string, unknown>;
 };
 
 export type JobResourceSettings = {
@@ -131,24 +133,36 @@ export class JobService {
   constructor(
     private readonly database: Database,
     private readonly projectsDir: string,
-    private readonly handlers: JobHandlers = {}
+    private handlers: JobHandlers = {}
   ) {}
+
+  setHandlers(handlers: JobHandlers): void {
+    this.handlers = handlers;
+  }
 
   async enqueue(input: {
     projectId: string;
     jobType: JobType;
     priority?: number;
     maxAttempts?: number;
+    metadata?: Record<string, unknown>;
   }): Promise<JobSummary> {
     const id = randomUUID();
     await this.database.pool.query(
       `
         insert into jobs (
-          id, project_id, job_type, status, priority, max_attempts, scheduled_at
+          id, project_id, job_type, status, priority, max_attempts, scheduled_at, metadata
         )
-        values ($1, $2, $3, 'queued', $4, $5, now())
+        values ($1, $2, $3, 'queued', $4, $5, now(), $6)
       `,
-      [id, input.projectId, input.jobType, input.priority ?? 0, input.maxAttempts ?? 1]
+      [
+        id,
+        input.projectId,
+        input.jobType,
+        input.priority ?? 0,
+        input.maxAttempts ?? 1,
+        JSON.stringify(input.metadata ?? {})
+      ]
     );
     return (await this.getJob(id))!;
   }
@@ -189,12 +203,13 @@ export class JobService {
         handledJobs.push((await this.getJob(job.id))!);
         continue;
       }
-      const locked = await this.acquireProjectLock(job.projectId, job.id, settings.stale_heartbeat_seconds);
+      const jobTimeoutSeconds = timeoutSeconds(job.jobType, settings);
+      const locked = await this.acquireProjectLock(job.projectId, job.id, jobTimeoutSeconds);
       if (!locked) {
         continue;
       }
       try {
-        await this.startJob(job, settings);
+        await this.startJob(job, jobTimeoutSeconds);
         const handler = this.handlers[job.jobType];
         if (!handler) {
           throw new Error(`job_handler_not_configured:${job.jobType}`);
@@ -232,8 +247,9 @@ export class JobService {
     return result.rowCount ?? 0;
   }
 
-  private async startJob(job: JobSummary, settings: SettingsRow): Promise<void> {
+  private async startJob(job: JobSummary, jobTimeoutSeconds: number): Promise<void> {
     const now = Date.now();
+    const timeoutAt = new Date(now + jobTimeoutSeconds * 1000);
     await this.database.pool.query(
       `
         update jobs
@@ -251,8 +267,8 @@ export class JobService {
       [
         job.id,
         this.runnerId,
-        new Date(now + timeoutSeconds(job.jobType, settings) * 1000),
-        new Date(now + settings.stale_heartbeat_seconds * 1000)
+        timeoutAt,
+        timeoutAt
       ]
     );
   }
@@ -361,7 +377,7 @@ export class JobService {
   private async acquireProjectLock(
     projectId: string,
     jobId: string,
-    staleHeartbeatSeconds: number
+    jobTimeoutSeconds: number
   ): Promise<boolean> {
     const result = await this.database.pool.query(
       `
@@ -373,7 +389,7 @@ export class JobService {
         projectId,
         this.runnerId,
         `job:${jobId}`,
-        new Date(Date.now() + staleHeartbeatSeconds * 1000)
+        new Date(Date.now() + jobTimeoutSeconds * 1000)
       ]
     );
     return (result.rowCount ?? 0) > 0;
@@ -600,6 +616,7 @@ function mapJobRow(row: JobRow): JobSummary {
     scheduledAt: row.scheduled_at.toISOString(),
     startedAt: row.started_at?.toISOString() ?? null,
     finishedAt: row.finished_at?.toISOString() ?? null,
-    errorSummary: row.error_summary
+    errorSummary: row.error_summary,
+    metadata: row.metadata ?? {}
   };
 }

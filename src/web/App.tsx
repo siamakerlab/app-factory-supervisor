@@ -568,6 +568,7 @@ export function App() {
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [hooksBusy, setHooksBusy] = useState(false);
+  const [runBusyProjectId, setRunBusyProjectId] = useState<string | null>(null);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [completionGate, setCompletionGate] = useState<CompletionGateResponse | null>(null);
@@ -761,6 +762,43 @@ export function App() {
     setCompletionGate((await response.json()) as CompletionGateResponse);
     await loadApiState();
     await loadProjectDetail(projectId);
+  }
+
+  async function startProjectRun(projectId: string) {
+    setRunBusyProjectId(projectId);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/run/start`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        setApiState("error");
+        return;
+      }
+      await response.json();
+      await loadApiState();
+      await loadProjectDetail(projectId);
+    } finally {
+      setRunBusyProjectId(null);
+    }
+  }
+
+  async function stopProjectRun(projectId: string) {
+    setRunBusyProjectId(projectId);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/run/stop`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        setApiState("error");
+        return;
+      }
+      setProjectDetail((await response.json()) as ProjectDetail);
+      await loadApiState();
+    } finally {
+      setRunBusyProjectId(null);
+    }
   }
 
   async function sendTestEmail() {
@@ -1116,6 +1154,9 @@ export function App() {
                 onSupervisorInstruction={(input) =>
                   void queueSupervisorInstruction(projectDetail.id, input)
                 }
+                runBusy={runBusyProjectId === projectDetail.id}
+                onStartRun={() => void startProjectRun(projectDetail.id)}
+                onStopRun={() => void stopProjectRun(projectDetail.id)}
                 completionGate={completionGate?.projectId === projectDetail.id ? completionGate : null}
                 onCompletionGate={() => void runCompletionGate(projectDetail.id)}
               />
@@ -1396,6 +1437,9 @@ function ProjectDetailPanel({
   checklistBusyKey,
   onChecklistUpdate,
   onSupervisorInstruction,
+  runBusy,
+  onStartRun,
+  onStopRun,
   completionGate,
   onCompletionGate
 }: {
@@ -1412,6 +1456,9 @@ function ProjectDetailPanel({
     priority: "low" | "normal" | "high";
     applyAfterCurrentWorkerRun: boolean;
   }) => void;
+  runBusy: boolean;
+  onStartRun: () => void;
+  onStopRun: () => void;
   completionGate: CompletionGateResponse | null;
   onCompletionGate: () => void;
 }) {
@@ -1444,6 +1491,7 @@ function ProjectDetailPanel({
             ["App", project.appName],
             ["Package", project.packageName],
             ["Repository", project.repositoryUrl],
+            ["Project status", project.status],
             ["Current phase", project.currentPhase],
             ["Verification", project.verification.overallStatus],
             ["Latest tier", project.verification.latestTier ?? "none"],
@@ -1452,10 +1500,18 @@ function ProjectDetailPanel({
         />
         <div>
           <div className="panel-heading compact">
-            <h3>Completion Gate</h3>
-            <button type="button" onClick={onCompletionGate}>
-              Evaluate
-            </button>
+            <h3>Run Control</h3>
+            <div className="button-row compact-actions">
+              <button type="button" disabled={runBusy} onClick={onStartRun}>
+                {runBusy ? "Working" : "Queue Turn"}
+              </button>
+              <button type="button" disabled={runBusy || project.status !== "running"} onClick={onStopRun}>
+                Stop
+              </button>
+              <button type="button" onClick={onCompletionGate}>
+                Evaluate
+              </button>
+            </div>
           </div>
           <p className="message-box">
             {completionGate
