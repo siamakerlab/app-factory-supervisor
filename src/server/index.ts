@@ -17,6 +17,8 @@ import { registerProjectExportRoutes } from "./exports/routes.js";
 import { ProjectExportService } from "./exports/service.js";
 import { registerJobRoutes } from "./jobs/routes.js";
 import { JobService } from "./jobs/service.js";
+import { registerNotificationRoutes } from "./notifications/routes.js";
+import { NotificationService } from "./notifications/service.js";
 import { GitAutomationService } from "./projects/gitAutomation.js";
 import { registerProjectRoutes } from "./projects/routes.js";
 import { ProjectService } from "./projects/service.js";
@@ -33,10 +35,11 @@ const database = createDatabase(config);
 const readiness = {
   migrated: false
 };
-const settingsService = new SettingsService(database);
+const settingsService = new SettingsService(database, config);
 const artifactService = new ArtifactService(database, config);
 const projectExportService = new ProjectExportService(database, config);
 const jobService = new JobService(database, config.APP_PROJECTS_DIR);
+const notificationService = new NotificationService(database, config);
 const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
@@ -58,10 +61,11 @@ registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService, co
 registerCodexRunnerRoutes(server, codexRunnerService);
 registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
-registerProjectRoutes(server, projectService, gitAutomationService);
+registerProjectRoutes(server, projectService, gitAutomationService, notificationService);
 registerArtifactRoutes(server, artifactService);
 registerProjectExportRoutes(server, projectExportService);
 registerJobRoutes(server, jobService);
+registerNotificationRoutes(server, notificationService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

@@ -25,4 +25,22 @@ export function registerSettingsRoutes(
       throw error;
     }
   });
+
+  server.put("/api/settings/smtp", async (request, reply) => {
+    try {
+      return await settingsService.configureSmtp(request.body, {
+        actorType: "admin",
+        ...(request.sessionUser?.userId ? { actorId: request.sessionUser.userId } : {}),
+        ipAddress: request.ip
+      });
+    } catch (error) {
+      if (error instanceof ZodError) {
+        return reply.code(400).send({
+          error: "invalid_smtp_settings",
+          issues: error.issues
+        });
+      }
+      throw error;
+    }
+  });
 }

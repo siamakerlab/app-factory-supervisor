@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
+import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
 import {
   publicSettingsSchema,
+  smtpSettingsSchema,
   updatePublicSettingsSchema,
   type PublicSettings,
+  type SmtpSettingsInput,
   type UpdatePublicSettings
 } from "./schema.js";
 
@@ -29,6 +34,7 @@ type SettingsRow = {
   export_timeout_seconds: number;
   emulator_timeout_seconds: number;
   email_notifications_enabled: boolean;
+  notification_recipient_email: string | null;
   smtp_secret_id: string | null;
 };
 
@@ -52,7 +58,8 @@ const fieldToColumn = {
   mcpToolTimeoutSeconds: "mcp_tool_timeout_seconds",
   exportTimeoutSeconds: "export_timeout_seconds",
   emulatorTimeoutSeconds: "emulator_timeout_seconds",
-  emailNotificationsEnabled: "email_notifications_enabled"
+  emailNotificationsEnabled: "email_notifications_enabled",
+  notificationRecipientEmail: "notification_recipient_email"
 } as const satisfies Record<keyof UpdatePublicSettings, string>;
 
 export type SettingsAuditActor = {
@@ -62,7 +69,10 @@ export type SettingsAuditActor = {
 };
 
 export class SettingsService {
-  constructor(private readonly database: Database) {}
+  constructor(
+    private readonly database: Database,
+    private readonly config?: AppConfig
+  ) {}
 
   async getPublicSettings(): Promise<PublicSettings> {
     const row = await this.getSettingsRow();
@@ -98,6 +108,53 @@ export class SettingsService {
     const next = await this.getPublicSettings();
     await this.recordSettingsAudit(previous, next, keys, actor);
     return next;
+  }
+
+  async configureSmtp(input: unknown, actor: SettingsAuditActor = { actorType: "system" }): Promise<PublicSettings> {
+    if (!this.config) {
+      throw new Error("settings_config_required");
+    }
+    const smtp = smtpSettingsSchema.parse(input);
+    const secretId = randomUUID();
+    const secretDir = join(this.config.APP_DATA_DIR, "secrets", "smtp");
+    const secretPath = join(secretDir, `${secretId}.json`);
+    await mkdir(secretDir, { recursive: true, mode: 0o700 });
+    await writeFile(secretPath, JSON.stringify(redactedSmtpSecret(smtp), null, 2), {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    await this.database.pool.query(
+      `
+        insert into secrets (id, secret_type, storage_path, description, created_at, updated_at)
+        values ($1, 'smtp_credentials', $2, 'SMTP notification credentials', now(), now())
+      `,
+      [secretId, secretPath]
+    );
+    await this.database.pool.query(
+      `
+        update app_settings
+        set smtp_secret_id = $1,
+            notification_recipient_email = $2,
+            email_notifications_enabled = true,
+            updated_at = now()
+        where id = true
+      `,
+      [secretId, smtp.recipientEmail]
+    );
+    await this.database.pool.query(
+      `
+        insert into app_audit_events (id, event_type, actor_type, actor_id, ip_address, summary, metadata, created_at)
+        values ($1, 'settings.smtp_configured', $2, $3, $4, 'Configured SMTP notification settings', $5, now())
+      `,
+      [
+        randomUUID(),
+        actor.actorType,
+        actor.actorId ?? null,
+        actor.ipAddress ?? null,
+        { host: smtp.host, port: smtp.port, secure: smtp.secure, fromEmail: smtp.fromEmail, recipientEmail: smtp.recipientEmail }
+      ]
+    );
+    return this.getPublicSettings();
   }
 
   private async getSettingsRow(): Promise<SettingsRow> {
@@ -160,8 +217,13 @@ function mapSettingsRow(row: SettingsRow): PublicSettings {
     exportTimeoutSeconds: row.export_timeout_seconds,
     emulatorTimeoutSeconds: row.emulator_timeout_seconds,
     emailNotificationsEnabled: row.email_notifications_enabled,
+    notificationRecipientEmail: row.notification_recipient_email,
     smtpConfigured: row.smtp_secret_id !== null
   });
+}
+
+function redactedSmtpSecret(input: SmtpSettingsInput): SmtpSettingsInput {
+  return input;
 }
 
 function pickChanged(settings: PublicSettings, keys: Array<keyof UpdatePublicSettings>) {

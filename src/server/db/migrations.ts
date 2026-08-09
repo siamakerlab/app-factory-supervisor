@@ -605,6 +605,17 @@ alter table verification_results
 create index if not exists idx_verification_results_project_tier
   on verification_results(project_id, verification_tier, created_at desc);
 `
+  },
+  {
+    id: "0011_email_notification_settings",
+    description: "Add email notification recipient settings",
+    sql: `
+alter table app_settings
+  add column if not exists notification_recipient_email text;
+
+create index if not exists idx_notifications_project_created
+  on notifications(project_id, created_at desc);
+`
   }
 ];
 
@@ -664,5 +675,6 @@ export const expectedMvpIndexes = [
   "idx_artifacts_created",
   "idx_artifacts_retention",
   "idx_supervisor_instructions_project_status",
-  "idx_verification_results_project_tier"
+  "idx_verification_results_project_tier",
+  "idx_notifications_project_created"
 ] as const;

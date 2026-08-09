@@ -21,6 +21,7 @@ export const publicSettingsSchema = z.object({
   exportTimeoutSeconds: z.number().int().min(60).max(86400),
   emulatorTimeoutSeconds: z.number().int().min(60).max(86400),
   emailNotificationsEnabled: z.boolean(),
+  notificationRecipientEmail: z.string().email().nullable(),
   smtpConfigured: z.boolean()
 });
 
@@ -33,3 +34,15 @@ export const updatePublicSettingsSchema = publicSettingsSchema
 
 export type PublicSettings = z.infer<typeof publicSettingsSchema>;
 export type UpdatePublicSettings = z.infer<typeof updatePublicSettingsSchema>;
+
+export const smtpSettingsSchema = z.object({
+  host: z.string().trim().min(1).max(300),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean(),
+  username: z.string().trim().min(1).max(300),
+  password: z.string().min(1).max(2000),
+  fromEmail: z.string().trim().email().max(300),
+  recipientEmail: z.string().trim().email().max(300)
+});
+
+export type SmtpSettingsInput = z.infer<typeof smtpSettingsSchema>;

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 import type { GitAutomationService } from "./gitAutomation.js";
+import type { NotificationService } from "../notifications/service.js";
 import { planNextWorkerPrompt } from "../supervisor/promptPlanner.js";
 import {
   commitUnitWorkSchema,
@@ -15,7 +16,8 @@ import type { ProjectService } from "./service.js";
 export function registerProjectRoutes(
   server: FastifyInstance,
   projectService: ProjectService,
-  gitAutomationService: GitAutomationService
+  gitAutomationService: GitAutomationService,
+  notificationService?: NotificationService
 ): void {
   server.get("/api/projects", async () => ({
     projects: await projectService.listProjects()
@@ -99,7 +101,15 @@ export function registerProjectRoutes(
           error: "project_not_found"
         });
       }
-      return result;
+      const project = await projectService.getProjectDetail(request.params.projectId);
+      const notification =
+        project && notificationService
+          ? await notificationService.sendTerminalProjectEmail({ project, completion: result })
+          : { status: "skipped", summary: "Notification service unavailable." };
+      return {
+        ...result,
+        notification
+      };
     }
   );
 

@@ -40,6 +40,7 @@ type PublicSettings = {
   exportTimeoutSeconds: number;
   emulatorTimeoutSeconds: number;
   emailNotificationsEnabled: boolean;
+  notificationRecipientEmail: string | null;
   smtpConfigured: boolean;
 };
 
@@ -536,6 +537,7 @@ export function App() {
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [completionGate, setCompletionGate] = useState<CompletionGateResponse | null>(null);
+  const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -707,6 +709,19 @@ export function App() {
     setCompletionGate((await response.json()) as CompletionGateResponse);
     await loadApiState();
     await loadProjectDetail(projectId);
+  }
+
+  async function sendTestEmail() {
+    const response = await fetch("/api/notifications/test-email", {
+      method: "POST",
+      credentials: "include"
+    });
+    if (!response.ok) {
+      setApiState("error");
+      return;
+    }
+    const result = (await response.json()) as { status: string; summary: string };
+    setTestEmailResult(`${result.status}: ${result.summary}`);
   }
 
   async function runCodexCompatibilityReview() {
@@ -1108,7 +1123,9 @@ export function App() {
                 toolchain,
                 capabilities,
                 buildEnvironmentRows,
-                apiState
+                apiState,
+                testEmailResult,
+                () => void sendTestEmail()
               )}
             </div>
           </div>
@@ -1779,7 +1796,9 @@ function renderSettingsTab(
   toolchain: ToolchainResponse | null,
   capabilities: CapabilityResponse | null,
   buildEnvironmentRows: KeyValueRows,
-  apiState: "loading" | "ready" | "auth" | "setup" | "error"
+  apiState: "loading" | "ready" | "auth" | "setup" | "error",
+  testEmailResult: string | null,
+  onTestEmail: () => void
 ) {
   if (apiState !== "ready") {
     return <EmptyState title={statusLabel(apiState)} detail={stateDetail(apiState)} />;
@@ -1802,15 +1821,20 @@ function renderSettingsTab(
       );
     case "email":
       return (
-        <SettingsGroup
-          title="Email Notifications"
-          rows={[
-            ["SMTP/provider", settings?.smtpConfigured ? "Configured" : "Not configured"],
-            ["Recipient", "Not configured"],
-            ["Test email", "Pending Phase 30"],
-            ["Terminal status toggle", settings?.emailNotificationsEnabled ? "Enabled" : "Disabled"]
-          ]}
-        />
+        <div className="settings-stack">
+          <SettingsGroup
+            title="Email Notifications"
+            rows={[
+              ["SMTP/provider", settings?.smtpConfigured ? "Configured" : "Not configured"],
+              ["Recipient", settings?.notificationRecipientEmail ?? "Not configured"],
+              ["Test email", testEmailResult ?? "Not sent"],
+              ["Terminal status toggle", settings?.emailNotificationsEnabled ? "Enabled" : "Disabled"]
+            ]}
+          />
+          <button type="button" onClick={onTestEmail} disabled={!settings?.smtpConfigured}>
+            Send Test Email
+          </button>
+        </div>
       );
     case "build":
       return (
