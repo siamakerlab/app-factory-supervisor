@@ -44,6 +44,46 @@ describe("automation job handlers", () => {
     expect(result.summary).toContain("Queued worker turn");
   });
 
+  it("marks a queued user instruction considered after using it in a supervisor prompt", async () => {
+    const recordSupervisorPrompt = vi.fn().mockResolvedValue(undefined);
+    const markSupervisorInstructionConsidered = vi.fn().mockResolvedValue(undefined);
+    const enqueue = vi.fn().mockResolvedValue(job({ id: "worker-job-1", jobType: "worker_turn" }));
+    const handlers = createAutomationJobHandlers({
+      projectService: {
+        getProjectDetail: vi.fn().mockResolvedValue(
+          projectDetail({
+            supervisorInstructions: [
+              {
+                id: "instruction-1",
+                instruction: "Prioritize reviewing the onboarding flow.",
+                attachmentArtifactId: null,
+                priority: "normal",
+                applyAfterCurrentWorkerRun: true,
+                status: "queued",
+                createdAt: "2026-08-09T00:00:00.000Z",
+                consideredAt: null
+              }
+            ]
+          })
+        ),
+        recordSupervisorPrompt,
+        markSupervisorInstructionConsidered
+      } as Partial<ProjectService> as ProjectService,
+      codexRunnerService: {} as CodexRunnerService,
+      jobEnqueuer: {
+        enqueue
+      }
+    });
+
+    await handlers.supervisor_turn!(job({ jobType: "supervisor_turn" }));
+
+    expect(recordSupervisorPrompt.mock.calls[0]?.[2]).toMatchObject({
+      source: "user_instruction",
+      usesQueuedInstructionId: "instruction-1"
+    });
+    expect(markSupervisorInstructionConsidered).toHaveBeenCalledWith(projectId, "instruction-1");
+  });
+
   it("runs Codex with the worker prompt stored in job metadata", async () => {
     const run = vi.fn().mockResolvedValue({
       runId: "run-1",
@@ -160,7 +200,7 @@ function job(overrides: Partial<JobSummary> = {}): JobSummary {
   };
 }
 
-function projectDetail(): ProjectDetail {
+function projectDetail(overrides: Partial<ProjectDetail> = {}): ProjectDetail {
   return {
     id: projectId,
     projectName: "Demo Project",
@@ -207,6 +247,7 @@ function projectDetail(): ProjectDetail {
     supervisorInstructions: [],
     recentArtifacts: [],
     recentExports: [],
-    finalStatusSummary: "Automation is running."
+    finalStatusSummary: "Automation is running.",
+    ...overrides
   };
 }

@@ -631,6 +631,23 @@ export class ProjectService {
     return this.getProjectDetail(projectId);
   }
 
+  async markSupervisorInstructionConsidered(
+    projectId: string,
+    instructionId: string
+  ): Promise<void> {
+    await this.database.pool.query(
+      `
+        update supervisor_instructions
+        set status = 'considered',
+            considered_at = now()
+        where project_id = $1
+          and id = $2
+          and status = 'queued'
+      `,
+      [projectId, instructionId]
+    );
+  }
+
   async evaluateAndApplyCompletionGate(projectId: string): Promise<ProjectCompletionGate | null> {
     const project = await this.getProjectDetail(projectId);
     if (!project) {

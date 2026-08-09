@@ -33,6 +33,12 @@ export function createAutomationJobHandlers(input: {
         usesQueuedInstructionId: nextPrompt.usesQueuedInstructionId,
         wordCount: nextPrompt.wordCount
       });
+      if (nextPrompt.usesQueuedInstructionId) {
+        await input.projectService.markSupervisorInstructionConsidered(
+          job.projectId,
+          nextPrompt.usesQueuedInstructionId
+        );
+      }
       const workerJob = await input.jobEnqueuer.enqueue({
         projectId: job.projectId,
         jobType: "worker_turn",
