@@ -24,6 +24,7 @@ import { registerProjectRoutes } from "./projects/routes.js";
 import { ProjectService } from "./projects/service.js";
 import { ensureRuntimeDirectories, getRuntimePaths } from "./runtime/paths.js";
 import { registerFail2banRoutes } from "./security/fail2ban/routes.js";
+import { registerSecurityIsolationRoutes } from "./security/isolation/routes.js";
 import { registerSetupRoutes } from "./setup/routes.js";
 import { SetupService } from "./setup/service.js";
 import { SettingsService } from "./settings/service.js";
@@ -56,6 +57,7 @@ const server = await buildServer({
   settingsService
 });
 registerFail2banRoutes(server, database);
+registerSecurityIsolationRoutes(server, config);
 registerSetupRoutes(server, setupService);
 registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService, codexHookService);
 registerCodexRunnerRoutes(server, codexRunnerService);

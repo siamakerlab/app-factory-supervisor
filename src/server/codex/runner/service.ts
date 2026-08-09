@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { AppConfig } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { getRuntimePaths } from "../../runtime/paths.js";
+import { allowedWorkerEnvironment } from "../../security/isolation.js";
 import { redactSecrets } from "../../security/secretScanner.js";
 import { summarizeCodexJsonl } from "../jsonl.js";
 
@@ -458,7 +459,7 @@ function runProcess(command: CodexRunnerCommand): Promise<{ exitCode: number | n
   return new Promise((resolve) => {
     const child = spawn(command.command, command.args, {
       cwd: command.cwd,
-      env: allowedEnvironment(),
+      env: allowedWorkerEnvironment(),
       stdio: ["ignore", "pipe", "pipe"]
     });
     const stdoutChunks: Buffer[] = [];
@@ -502,32 +503,6 @@ function runProcess(command: CodexRunnerCommand): Promise<{ exitCode: number | n
       ]).then(() => resolve({ exitCode }));
     });
   });
-}
-
-
-function allowedEnvironment(): NodeJS.ProcessEnv {
-  const allowedKeys = [
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "CODEX_HOME",
-    "OPENAI_API_KEY",
-    "ANDROID_HOME",
-    "ANDROID_SDK_ROOT",
-    "ANDROID_AVD_HOME",
-    "JAVA_HOME",
-    "GRADLE_USER_HOME"
-  ];
-  return Object.fromEntries(
-    allowedKeys
-      .map((key) => [key, process.env[key]])
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-  );
 }
 
 async function readText(path: string): Promise<string> {

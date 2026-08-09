@@ -69,6 +69,29 @@ type Fail2banResponse = {
   }>;
 };
 
+type SecurityIsolationResponse = {
+  status: "pass" | "warn" | "fail";
+  workerModel: "same_container_child_process";
+  projectWorkspaceRoot: string;
+  appDataDir: string;
+  codexHomeDir: string;
+  appSecretsDir: string;
+  environmentAllowlist: string[];
+  deniedAppGlobalPaths: string[];
+  normalRunnerAccess: {
+    workerCannotReachAppSecretPathsThroughConfig: boolean;
+    appGlobalPathsAbsentFromWorkerEnv: boolean;
+    projectWorkspaceDedicated: boolean;
+  };
+  guards: Array<{
+    id: string;
+    label: string;
+    status: "pass" | "warn" | "fail";
+    detail: string;
+  }>;
+  limitations: string[];
+};
+
 type CodexCompatibilityResponse = {
   status: "pass" | "fail" | "not_run";
   codexCliVersion: string | null;
@@ -494,16 +517,6 @@ const secretRows: KeyValueRows = [
   ["Keystore references", "Project-specific"]
 ];
 
-const securityRows: KeyValueRows = [
-  ["Trusted proxy", "Disabled"],
-  ["External exposure warning", "Review before public access"],
-  ["Hook trust", "Bypassed for managed yolo runs"],
-  ["Yolo/process isolation", "Same-container safeguards required"],
-  ["Secret redaction", "Prompt/log/email policy enabled"],
-  ["Worker model", "Same container child process"],
-  ["Host fail2ban integration", "Template provided"]
-];
-
 const timelineRows = [
   "Create or import an Android/Kotlin project.",
   "Supervisor will draft the first worker prompt.",
@@ -515,6 +528,7 @@ export function App() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fail2ban, setFail2ban] = useState<Fail2banResponse | null>(null);
+  const [securityIsolation, setSecurityIsolation] = useState<SecurityIsolationResponse | null>(null);
   const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
     null
   );
@@ -577,6 +591,7 @@ export function App() {
       const [
         settingsResponse,
         fail2banResponse,
+        isolationResponse,
         codexResponse,
         codexHooksResponse,
         codexDocsResponse,
@@ -589,6 +604,7 @@ export function App() {
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
+        fetch("/api/security/isolation", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
         fetch("/api/codex/hooks/status", { credentials: "include" }),
         fetch("/api/codex/docs", { credentials: "include" }),
@@ -602,6 +618,7 @@ export function App() {
       if (
         !settingsResponse.ok ||
         !fail2banResponse.ok ||
+        !isolationResponse.ok ||
         !codexResponse.ok ||
         !codexHooksResponse.ok ||
         !codexDocsResponse.ok ||
@@ -617,6 +634,7 @@ export function App() {
       }
       setSettings((await settingsResponse.json()) as PublicSettings);
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
+      setSecurityIsolation((await isolationResponse.json()) as SecurityIsolationResponse);
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
       setCodexHooks((await codexHooksResponse.json()) as CodexHookStatusResponse);
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
@@ -1146,6 +1164,7 @@ export function App() {
                 settings,
                 session,
                 fail2ban,
+                securityIsolation,
                 codexCompatibility,
                 codexHooks,
                 codexDocs,
@@ -1819,6 +1838,7 @@ function renderSettingsTab(
   settings: PublicSettings | null,
   session: SessionResponse | null,
   fail2ban: Fail2banResponse | null,
+  securityIsolation: SecurityIsolationResponse | null,
   codexCompatibility: CodexCompatibilityResponse | null,
   codexHooks: CodexHookStatusResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
@@ -1991,7 +2011,50 @@ function renderSettingsTab(
         />
       );
     case "security":
-      return <SettingsGroup title="Security And Safety" rows={securityRows} />;
+      return (
+        <div className="settings-stack">
+          <SettingsGroup
+            title="Security And Safety"
+            rows={[
+              ["Overall status", securityIsolation?.status ?? "unknown"],
+              ["Worker model", securityIsolation?.workerModel ?? "same_container_child_process"],
+              [
+                "Normal secret-path access",
+                boolLabel(
+                  securityIsolation?.normalRunnerAccess.workerCannotReachAppSecretPathsThroughConfig
+                )
+              ],
+              ["Project workspace", securityIsolation?.projectWorkspaceRoot ?? "Unavailable"],
+              ["App data", securityIsolation?.appDataDir ?? "Unavailable"],
+              ["Codex home", securityIsolation?.codexHomeDir ?? "Unavailable"],
+              ["App secrets", securityIsolation?.appSecretsDir ?? "Unavailable"],
+              ["Environment allowlist", securityIsolation?.environmentAllowlist.join(", ") ?? "Unavailable"],
+              ["Denied app-global paths", securityIsolation?.deniedAppGlobalPaths.join("; ") ?? "Unavailable"],
+              ["Hook trust", "Bypassed for managed yolo runs"],
+              ["Secret redaction", "Prompt/log/email policy enabled"],
+              ["Host fail2ban integration", "Template provided"]
+            ]}
+          />
+          <SettingsGroup
+            title="Isolation Guards"
+            rows={
+              securityIsolation?.guards.map((guard) => [
+                guard.label,
+                `${guard.status.toUpperCase()}: ${guard.detail}`
+              ]) ?? [["Status", "Unavailable"]]
+            }
+          />
+          <SettingsGroup
+            title="Known Limitations"
+            rows={
+              securityIsolation?.limitations.map((limitation, index) => [
+                `Limitation ${index + 1}`,
+                limitation
+              ]) ?? [["Status", "Unavailable"]]
+            }
+          />
+        </div>
+      );
     case "fail2ban":
       return (
         <div className="settings-stack">
