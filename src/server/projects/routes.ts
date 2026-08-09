@@ -6,6 +6,7 @@ import {
   commitUnitWorkSchema,
   createProjectSchema,
   pushPhaseSchema,
+  queueSupervisorInstructionSchema,
   updateChecklistItemSchema
 } from "./schema.js";
 import type { ProjectService } from "./service.js";
@@ -67,6 +68,36 @@ export function registerProjectRoutes(
         if (error instanceof ZodError) {
           return reply.code(400).send({
             error: "invalid_checklist_item",
+            issues: error.issues
+          });
+        }
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/supervisor-instructions",
+    async (request, reply) => {
+      try {
+        const body = queueSupervisorInstructionSchema.parse(request.body);
+        const project = await projectService.queueSupervisorInstruction(request.params.projectId, {
+          instruction: body.instruction,
+          attachmentArtifactId: body.attachmentArtifactId ?? null,
+          priority: body.priority,
+          applyAfterCurrentWorkerRun: body.applyAfterCurrentWorkerRun,
+          createdByUserId: request.sessionUser?.userId ?? null
+        });
+        if (!project) {
+          return reply.code(404).send({
+            error: "project_not_found"
+          });
+        }
+        return reply.code(201).send(project);
+      } catch (error) {
+        if (error instanceof ZodError) {
+          return reply.code(400).send({
+            error: "invalid_supervisor_instruction",
             issues: error.issues
           });
         }

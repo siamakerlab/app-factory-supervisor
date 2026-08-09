@@ -311,6 +311,16 @@ type ProjectDetail = ProjectSummary & {
     secret: boolean;
     lastValidation: string | null;
   }>;
+  supervisorInstructions: Array<{
+    id: string;
+    instruction: string;
+    attachmentArtifactId: string | null;
+    priority: "low" | "normal" | "high";
+    applyAfterCurrentWorkerRun: boolean;
+    status: "queued" | "considered" | "applied" | "dismissed";
+    createdAt: string;
+    consideredAt: string | null;
+  }>;
   recentArtifacts: Array<{
     id: string;
     runId: string | null;
@@ -646,6 +656,29 @@ export function App() {
     }
   }
 
+  async function queueSupervisorInstruction(
+    projectId: string,
+    input: {
+      instruction: string;
+      priority: "low" | "normal" | "high";
+      applyAfterCurrentWorkerRun: boolean;
+    }
+  ) {
+    const response = await fetch(`/api/projects/${projectId}/supervisor-instructions`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+    if (!response.ok) {
+      setApiState("error");
+      return;
+    }
+    setProjectDetail((await response.json()) as ProjectDetail);
+  }
+
   async function runCodexCompatibilityReview() {
     setCodexReviewBusy(true);
     try {
@@ -912,6 +945,9 @@ export function App() {
                 onChecklistUpdate={(itemKey, status) =>
                   void updateChecklistItem(projectDetail.id, itemKey, status)
                 }
+                onSupervisorInstruction={(input) =>
+                  void queueSupervisorInstruction(projectDetail.id, input)
+                }
               />
             ) : (
               <p className="muted-copy">Select a project to inspect progress, timeline, and artifacts.</p>
@@ -1158,7 +1194,8 @@ function ProjectDetailPanel({
   exportBusy,
   onExport,
   checklistBusyKey,
-  onChecklistUpdate
+  onChecklistUpdate,
+  onSupervisorInstruction
 }: {
   project: ProjectDetail;
   exportBusy: boolean;
@@ -1168,8 +1205,33 @@ function ProjectDetailPanel({
     itemKey: string,
     status: ProjectDetail["userRequiredItems"][number]["status"]
   ) => void;
+  onSupervisorInstruction: (input: {
+    instruction: string;
+    priority: "low" | "normal" | "high";
+    applyAfterCurrentWorkerRun: boolean;
+  }) => void;
 }) {
   const latestWorker = project.latestWorkerResponse ?? "No worker response yet.";
+  const [instruction, setInstruction] = useState("");
+  const [priority, setPriority] = useState<"low" | "normal" | "high">("normal");
+  const [applyAfterCurrentWorkerRun, setApplyAfterCurrentWorkerRun] = useState(true);
+
+  function submitInstruction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = instruction.trim();
+    if (!trimmed) {
+      return;
+    }
+    onSupervisorInstruction({
+      instruction: trimmed,
+      priority,
+      applyAfterCurrentWorkerRun
+    });
+    setInstruction("");
+    setPriority("normal");
+    setApplyAfterCurrentWorkerRun(true);
+  }
+
   return (
     <div className="project-detail">
       <div className="detail-summary">
@@ -1307,6 +1369,54 @@ function ProjectDetailPanel({
           </div>
         </section>
       </div>
+
+      <section>
+        <div className="panel-heading compact">
+          <h3>Supervisor Instruction</h3>
+          <span className="chip muted">Queued guidance</span>
+        </div>
+        <form className="instruction-form" onSubmit={submitInstruction}>
+          <textarea
+            value={instruction}
+            maxLength={4000}
+            onChange={(event) => setInstruction(event.target.value)}
+          />
+          <div>
+            <select value={priority} onChange={(event) => setPriority(event.target.value as typeof priority)}>
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+            </select>
+            <label>
+              <input
+                type="checkbox"
+                checked={applyAfterCurrentWorkerRun}
+                onChange={(event) => setApplyAfterCurrentWorkerRun(event.target.checked)}
+              />
+              Apply after current worker run
+            </label>
+            <button type="submit" disabled={instruction.trim().length === 0}>
+              Queue
+            </button>
+          </div>
+        </form>
+        <div className="mini-table dense">
+          {project.supervisorInstructions.slice(0, 6).map((item) => (
+            <div className="mini-row" key={item.id}>
+              <span>{item.priority}</span>
+              <span>{item.status}</span>
+              <span>{compactText(item.instruction, 180)}</span>
+            </div>
+          ))}
+          {project.supervisorInstructions.length === 0 ? (
+            <div className="mini-row">
+              <span>none</span>
+              <span>queued</span>
+              <span>No user instruction queued for supervisor.</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <div className="detail-columns">
         <section>

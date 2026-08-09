@@ -67,9 +67,21 @@ export type ProjectDetail = ProjectSummary & {
     recent: VerificationSummary[];
   };
   userRequiredItems: UserRequiredItemSummary[];
+  supervisorInstructions: SupervisorInstructionSummary[];
   recentArtifacts: ProjectArtifactSummary[];
   recentExports: ProjectExportSummary[];
   finalStatusSummary: string;
+};
+
+export type SupervisorInstructionSummary = {
+  id: string;
+  instruction: string;
+  attachmentArtifactId: string | null;
+  priority: "low" | "normal" | "high";
+  applyAfterCurrentWorkerRun: boolean;
+  status: "queued" | "considered" | "applied" | "dismissed";
+  createdAt: string;
+  consideredAt: string | null;
 };
 
 export type ProgressGateSummary = {
@@ -221,6 +233,17 @@ type ProjectExportRow = {
   error_summary: string | null;
   requested_at: Date;
   finished_at: Date | null;
+};
+
+type SupervisorInstructionRow = {
+  id: string;
+  instruction: string;
+  attachment_artifact_id: string | null;
+  priority: SupervisorInstructionSummary["priority"];
+  apply_after_current_worker_run: boolean;
+  status: SupervisorInstructionSummary["status"];
+  created_at: Date;
+  considered_at: Date | null;
 };
 
 type SettingsRow = {
@@ -398,12 +421,21 @@ export class ProjectService {
     if (!project) {
       return null;
     }
-    const [gates, timeline, verification, userRequiredItems, recentArtifacts, recentExports] =
+    const [
+      gates,
+      timeline,
+      verification,
+      userRequiredItems,
+      supervisorInstructions,
+      recentArtifacts,
+      recentExports
+    ] =
       await Promise.all([
         this.getProgressGates(id),
         this.getTimeline(id),
         this.getVerification(id),
         this.getUserRequiredItems(id),
+        this.getSupervisorInstructions(id),
         this.getRecentArtifacts(id),
         this.getRecentExports(id)
       ]);
@@ -433,6 +465,7 @@ export class ProjectService {
         recent: verification
       },
       userRequiredItems,
+      supervisorInstructions,
       recentArtifacts,
       recentExports,
       finalStatusSummary: finalStatusSummary(project, percent, userRequiredItems, verification)
@@ -465,6 +498,41 @@ export class ProjectService {
       [projectId, itemKey, patch.status, secretId, patch.lastValidation ?? null]
     );
     await this.applyChecklistProjectStatus(projectId);
+    return this.getProjectDetail(projectId);
+  }
+
+  async queueSupervisorInstruction(
+    projectId: string,
+    input: {
+      instruction: string;
+      attachmentArtifactId?: string | null;
+      priority?: "low" | "normal" | "high";
+      applyAfterCurrentWorkerRun?: boolean;
+      createdByUserId?: string | null;
+    }
+  ): Promise<ProjectDetail | null> {
+    const project = await this.getProject(projectId);
+    if (!project) {
+      return null;
+    }
+    await this.database.pool.query(
+      `
+        insert into supervisor_instructions (
+          id, project_id, instruction, attachment_artifact_id, priority,
+          apply_after_current_worker_run, status, created_by_user_id, created_at
+        )
+        values ($1, $2, $3, $4, $5, $6, 'queued', $7, now())
+      `,
+      [
+        randomUUID(),
+        projectId,
+        input.instruction,
+        input.attachmentArtifactId ?? null,
+        input.priority ?? "normal",
+        input.applyAfterCurrentWorkerRun ?? true,
+        input.createdByUserId ?? null
+      ]
+    );
     return this.getProjectDetail(projectId);
   }
 
@@ -674,6 +742,30 @@ export class ProjectService {
       sizeBytes: row.size_bytes === null ? null : Number(row.size_bytes),
       redacted: row.redacted,
       createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  private async getSupervisorInstructions(projectId: string): Promise<SupervisorInstructionSummary[]> {
+    const result = await this.database.pool.query<SupervisorInstructionRow>(
+      `
+        select id, instruction, attachment_artifact_id, priority,
+          apply_after_current_worker_run, status, created_at, considered_at
+        from supervisor_instructions
+        where project_id = $1
+        order by created_at desc
+        limit 20
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      instruction: row.instruction,
+      attachmentArtifactId: row.attachment_artifact_id,
+      priority: row.priority,
+      applyAfterCurrentWorkerRun: row.apply_after_current_worker_run,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      consideredAt: row.considered_at?.toISOString() ?? null
     }));
   }
 

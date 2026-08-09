@@ -571,6 +571,28 @@ create index if not exists idx_artifacts_retention
   on artifacts(retention_class, created_at)
   where deleted_at is null;
 `
+  },
+  {
+    id: "0009_supervisor_instructions",
+    description: "Queue user instructions for supervisor prompt planning",
+    sql: `
+create table if not exists supervisor_instructions (
+  id uuid primary key,
+  project_id uuid not null references projects(id) on delete cascade,
+  instruction text not null,
+  attachment_artifact_id uuid references artifacts(id) on delete set null,
+  priority text not null default 'normal' check (priority in ('low', 'normal', 'high')),
+  apply_after_current_worker_run boolean not null default true,
+  status text not null default 'queued' check (status in ('queued', 'considered', 'applied', 'dismissed')),
+  created_by_user_id uuid references users(id) on delete set null,
+  created_at timestamptz not null,
+  considered_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists idx_supervisor_instructions_project_status
+  on supervisor_instructions(project_id, status, created_at desc);
+`
   }
 ];
 
@@ -594,6 +616,7 @@ export const expectedMvpTables = [
   "project_locks",
   "process_heartbeats",
   "timeline_events",
+  "supervisor_instructions",
   "progress_gates",
   "user_required_items",
   "verification_results",
@@ -627,5 +650,6 @@ export const expectedMvpIndexes = [
   "idx_capability_install_runs_started",
   "idx_project_git_automation_events_project_created",
   "idx_artifacts_created",
-  "idx_artifacts_retention"
+  "idx_artifacts_retention",
+  "idx_supervisor_instructions_project_status"
 ] as const;

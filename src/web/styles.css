@@ -397,6 +397,46 @@ button {
   line-height: 1.45;
 }
 
+.instruction-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.instruction-form textarea {
+  min-height: 86px;
+  min-width: 0;
+  resize: vertical;
+  padding: 9px;
+  border: 1px solid #bdc8d4;
+  border-radius: 6px;
+  color: #1d2935;
+  font: inherit;
+}
+
+.instruction-form div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.instruction-form select {
+  min-height: 32px;
+  border: 1px solid #bdc8d4;
+  border-radius: 6px;
+  background: #ffffff;
+  font: inherit;
+}
+
+.instruction-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #405061;
+  font-size: 13px;
+}
+
 .run-history {
   display: grid;
   gap: 10px;

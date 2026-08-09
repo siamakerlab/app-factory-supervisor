@@ -36,3 +36,10 @@ export const updateChecklistItemSchema = z.object({
   status: z.enum(["needed", "provided", "pass", "failed", "blocked"]),
   lastValidation: z.string().trim().max(1000).optional()
 });
+
+export const queueSupervisorInstructionSchema = z.object({
+  instruction: z.string().trim().min(1).max(4000),
+  attachmentArtifactId: z.string().uuid().nullable().optional(),
+  priority: z.enum(["low", "normal", "high"]).default("normal"),
+  applyAfterCurrentWorkerRun: z.boolean().default(true)
+});
