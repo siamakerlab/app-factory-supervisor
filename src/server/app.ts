@@ -3,7 +3,11 @@ import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
 
-export async function buildServer() {
+export type ReadinessState = {
+  migrated: boolean;
+};
+
+export async function buildServer(readiness: ReadinessState = { migrated: false }) {
   const config = loadConfig();
   const server = Fastify({
     logger: {
@@ -15,10 +19,16 @@ export async function buildServer() {
     origin: false
   });
 
-  server.get("/health", () => ({
-    status: "ok",
-    service: "app-factory-supervisor"
-  }));
+  server.get("/health", (_request, reply) => {
+    const statusCode = readiness.migrated ? 200 : 503;
+    return reply.code(statusCode).send({
+      status: readiness.migrated ? "ready" : "starting",
+      service: "app-factory-supervisor",
+      checks: {
+        migrations: readiness.migrated ? "pass" : "pending"
+      }
+    });
+  });
 
   return server;
 }

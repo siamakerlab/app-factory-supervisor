@@ -70,6 +70,14 @@ docker compose up -d
 
 Open the web app and complete the first-run wizard.
 
+By default the app is published on host port `3090`:
+
+```text
+http://localhost:3090
+```
+
+Set `APP_PUBLISHED_PORT` before running Compose if that port is already in use.
+
 For local scaffold development:
 
 ```bash

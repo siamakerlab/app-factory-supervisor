@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.git
+.env
+.env.*
+!.env.example
+data
+projects
+exports
+artifacts
+runs
+toolchains
+capabilities
+secrets
+*.log
