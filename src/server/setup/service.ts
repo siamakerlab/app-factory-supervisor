@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
+import { getRuntimePaths } from "../runtime/paths.js";
 
 export type CommandCheck = {
   id: string;
@@ -50,6 +51,7 @@ type SetupRow = {
 
 const commandChecks: CommandCheckDefinition[] = [
   { id: "codex", command: "codex", args: ["--version"], required: true },
+  { id: "codex-login-status", command: "codex", args: ["login", "status"], required: true },
   { id: "docs-mcp-server", command: "docs-mcp-server", args: ["--version"], required: true },
   { id: "context7-mcp", command: "context7-mcp", args: ["--version"], required: true },
   { id: "mcp-server-mobile", command: "mcp-server-mobile", args: ["--version"], required: true },
@@ -104,7 +106,9 @@ export class SetupService {
   }
 
   async verifyEnvironment(): Promise<SetupStatus> {
-    const checks = await Promise.all(commandChecks.map((check) => runCommandCheck(check)));
+    const checks = await Promise.all(
+      commandChecks.map((check) => runCommandCheck(check, this.commandEnv()))
+    );
     const status = checks.every((check) => !check.required || check.status === "pass")
       ? "pass"
       : "fail";
@@ -160,7 +164,7 @@ export class SetupService {
         privateKeyPath,
         "-C",
         "app-factory-supervisor"
-      ]);
+      ], this.commandEnv());
     }
 
     await this.database.pool.query(
@@ -217,11 +221,34 @@ export class SetupService {
     }
     return row;
   }
+
+  private commandEnv(): NodeJS.ProcessEnv {
+    const paths = getRuntimePaths(this.config);
+    const androidHome = join(paths.toolchainsDir, "android-sdk");
+    return {
+      ...process.env,
+      CODEX_HOME: paths.codexHomeDir,
+      HOME: dirname(paths.codexHomeDir),
+      ANDROID_HOME: androidHome,
+      ANDROID_SDK_ROOT: androidHome,
+      ANDROID_AVD_HOME: join(paths.toolchainsDir, "avd"),
+      PATH: [
+        join(androidHome, "platform-tools"),
+        join(androidHome, "cmdline-tools", "latest", "bin"),
+        join(androidHome, "emulator"),
+        join(paths.toolchainsDir, "gradle", "bin"),
+        process.env.PATH ?? ""
+      ].join(":")
+    };
+  }
 }
 
-async function runCommandCheck(definition: CommandCheckDefinition): Promise<CommandCheck> {
+async function runCommandCheck(
+  definition: CommandCheckDefinition,
+  env: NodeJS.ProcessEnv
+): Promise<CommandCheck> {
   try {
-    const output = await runCommand(definition.command, definition.args, 5000);
+    const output = await runCommand(definition.command, definition.args, env, 5000);
     return {
       ...definition,
       status: "pass",
@@ -236,9 +263,15 @@ async function runCommandCheck(definition: CommandCheckDefinition): Promise<Comm
   }
 }
 
-async function runCommand(command: string, args: string[], timeoutMs = 15000): Promise<string> {
+async function runCommand(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs = 15000
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     const chunks: Buffer[] = [];
