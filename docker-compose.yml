@@ -10,6 +10,9 @@ services:
       DATABASE_URL: postgres://app_factory:app_factory@postgres:5432/app_factory_supervisor
       APP_DATA_DIR: /app/data
       APP_PROJECTS_DIR: /app/projects
+      SESSION_COOKIE_NAME: afs_session
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_TTL_DAYS: 7
     ports:
       - "${APP_PUBLISHED_PORT:-3090}:3000"
     volumes:

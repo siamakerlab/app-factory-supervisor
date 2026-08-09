@@ -1,4 +1,5 @@
 import { buildServer } from "./app.js";
+import { AuthService } from "./auth/service.js";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
@@ -11,8 +12,10 @@ const readiness = {
   migrated: false
 };
 const settingsService = new SettingsService(database);
+const authService = new AuthService(database, config);
 const server = await buildServer({
   readiness,
+  authService,
   settingsService
 });
 

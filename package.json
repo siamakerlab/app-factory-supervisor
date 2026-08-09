@@ -17,6 +17,7 @@
     "start": "node dist/server/index.js"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.1.0",
     "@tanstack/react-query": "^5.85.3",
     "@tanstack/react-router": "^1.131.28",

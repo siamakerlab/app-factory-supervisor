@@ -1,7 +1,10 @@
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
+import { registerAuthRoutes } from "./auth/routes.js";
+import type { AuthService } from "./auth/service.js";
 import type { SettingsService } from "./settings/service.js";
 import { registerSettingsRoutes } from "./settings/routes.js";
 
@@ -11,6 +14,7 @@ export type ReadinessState = {
 
 export type ServerDependencies = {
   readiness?: ReadinessState;
+  authService?: AuthService;
   settingsService?: SettingsService;
 };
 
@@ -26,6 +30,7 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
   await server.register(cors, {
     origin: false
   });
+  await server.register(cookie);
 
   server.get("/health", (_request, reply) => {
     const statusCode = readiness.migrated ? 200 : 503;
@@ -37,6 +42,10 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
       }
     });
   });
+
+  if (dependencies.authService) {
+    registerAuthRoutes(server, dependencies.authService, config);
+  }
 
   if (dependencies.settingsService) {
     registerSettingsRoutes(server, dependencies.settingsService);
