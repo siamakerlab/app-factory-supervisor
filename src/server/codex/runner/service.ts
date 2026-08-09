@@ -136,14 +136,23 @@ export class CodexRunnerService {
     const execution = await runProcess({ ...command, timeoutMs });
     const jsonl = await readText(command.jsonlPath);
     const stderr = await readText(command.stderrPath);
-    const finalMessage = (await readText(command.lastMessagePath)) || fallbackFinalMessage(execution, stderr);
-    const status = execution.exitCode === 0 ? "succeeded" : "failed";
     const jsonSummary = summarizeCodexJsonl(jsonl);
-    const codexThreadId = extractCodexThreadId(jsonl);
+    const finalMessage =
+      (await readText(command.lastMessagePath)) ||
+      jsonSummary.finalMessage ||
+      fallbackFinalMessage(execution, stderr);
+    const status = execution.exitCode === 0 ? "succeeded" : "failed";
+    const codexThreadId = jsonSummary.threadId;
     const [promptArtifactId, jsonlArtifactId, stderrArtifactId, finalMessageArtifactId] =
       await Promise.all([
         this.insertArtifact(input.projectId, runId, "codex_prompt", command.promptPath, false),
-        this.insertArtifact(input.projectId, runId, "codex_jsonl", command.jsonlPath, false),
+        this.insertArtifact(input.projectId, runId, "codex_jsonl", command.jsonlPath, false, {
+          eventTypes: jsonSummary.eventTypes,
+          eventCategories: jsonSummary.eventCategories,
+          tokenUsage: jsonSummary.tokenUsage,
+          failedCommands: jsonSummary.failedCommands,
+          schemaVersionSensitive: jsonSummary.schemaVersionSensitive
+        }),
         this.insertArtifact(input.projectId, runId, "codex_stderr", command.stderrPath, false),
         this.writeAndInsertFinalMessage(input.projectId, runId, command.lastMessagePath, finalMessage)
       ]);
@@ -264,7 +273,8 @@ export class CodexRunnerService {
     runId: string,
     artifactType: string,
     path: string,
-    redacted: boolean
+    redacted: boolean,
+    metadata: Record<string, unknown> = {}
   ): Promise<string> {
     const artifactId = randomUUID();
     const fileStats = await stat(path);
@@ -286,7 +296,7 @@ export class CodexRunnerService {
         sha256,
         fileStats.size,
         redacted,
-        JSON.stringify({ source: "codex_runner" })
+        JSON.stringify({ source: "codex_runner", ...metadata })
       ]
     );
     return artifactId;
@@ -384,31 +394,6 @@ function runProcess(command: CodexRunnerCommand): Promise<{ exitCode: number | n
   });
 }
 
-function extractCodexThreadId(jsonl: string): string | null {
-  const lines = jsonl.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as {
-        type?: unknown;
-        event?: unknown;
-        thread_id?: unknown;
-        threadId?: unknown;
-        thread?: { id?: unknown };
-      };
-      const type = typeof parsed.type === "string" ? parsed.type : parsed.event;
-      if (type !== "thread.started") {
-        continue;
-      }
-      const threadId = parsed.thread_id ?? parsed.threadId ?? parsed.thread?.id;
-      if (typeof threadId === "string" && threadId.length > 0) {
-        return threadId;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
 
 function allowedEnvironment(): NodeJS.ProcessEnv {
   const allowedKeys = [
