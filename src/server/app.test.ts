@@ -141,4 +141,36 @@ describe("auth/session integration", () => {
       error: "csrf_origin_rejected"
     });
   });
+
+  it("returns rate limited when the auth service reports a banned IP", async () => {
+    const authService = {
+      isAdminConfigured: () => Promise.resolve(true),
+      login: () =>
+        Promise.resolve({
+          ok: false as const,
+          reason: "ip_banned" as const
+        }),
+      getSession: () => Promise.resolve(null)
+    } as Partial<AuthService> as AuthService;
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      },
+      authService
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        adminId: "admin",
+        password: "correct horse battery staple"
+      }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toEqual({
+      error: "ip_banned"
+    });
+  });
 });

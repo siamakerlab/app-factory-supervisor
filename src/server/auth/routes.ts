@@ -82,6 +82,11 @@ export function registerAuthRoutes(
       }
       const result = await authService.login(body.adminId, body.password, loginContext);
       if (!result.ok) {
+        if (result.reason === "ip_banned") {
+          return reply.code(429).send({
+            error: result.reason
+          });
+        }
         return reply.code(401).send({
           error: result.reason
         });

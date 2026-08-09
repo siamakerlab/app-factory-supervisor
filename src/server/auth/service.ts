@@ -21,7 +21,7 @@ export type LoginResult =
     }
   | {
       ok: false;
-      reason: "invalid_credentials" | "setup_required";
+      reason: "invalid_credentials" | "setup_required" | "ip_banned";
     };
 
 type UserRow = {
@@ -35,6 +35,14 @@ type SessionRow = {
   user_id: string;
   admin_id: string;
   expires_at: Date;
+};
+
+type LoginFailurePolicyRow = {
+  login_failures_before_ban: number;
+};
+
+type LoginFailureCountRow = {
+  failure_count: number | string;
 };
 
 export class AuthService {
@@ -80,9 +88,19 @@ export class AuthService {
       userAgent?: string;
     }
   ): Promise<LoginResult> {
+    const ipAddress = context.ipAddress ?? "127.0.0.1";
+    if (await this.isIpBanned(ipAddress)) {
+      await this.recordLoginAttempt(adminId, false, "ip_banned", context);
+      return {
+        ok: false,
+        reason: "ip_banned"
+      };
+    }
+
     const user = await this.findUserByAdminId(adminId);
     if (!user) {
       await this.recordLoginAttempt(adminId, false, "invalid_credentials", context);
+      await this.applyFailureBanIfNeeded(ipAddress);
       return {
         ok: false,
         reason: "invalid_credentials"
@@ -92,6 +110,7 @@ export class AuthService {
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) {
       await this.recordLoginAttempt(adminId, false, "invalid_credentials", context);
+      await this.applyFailureBanIfNeeded(ipAddress);
       return {
         ok: false,
         reason: "invalid_credentials"
@@ -251,6 +270,65 @@ export class AuthService {
     if (!success) {
       await this.writeAuthFailureLog(adminId, failureReason ?? "unknown", context.ipAddress);
     }
+  }
+
+  private async isIpBanned(ipAddress: string): Promise<boolean> {
+    const result = await this.database.pool.query(
+      `
+        select 1
+        from banned_ips
+        where ip_address = $1::inet
+          and (expires_at is null or expires_at > now())
+        limit 1
+      `,
+      [ipAddress]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  private async applyFailureBanIfNeeded(ipAddress: string): Promise<void> {
+    const threshold = await this.getLoginFailureThreshold();
+    const result = await this.database.pool.query<LoginFailureCountRow>(
+      `
+        with last_success as (
+          select max(created_at) as at
+          from login_attempts
+          where ip_address = $1::inet
+            and success = true
+        )
+        select count(*)::int as failure_count
+        from login_attempts, last_success
+        where ip_address = $1::inet
+          and success = false
+          and failure_reason = 'invalid_credentials'
+          and created_at >= coalesce(last_success.at, '-infinity'::timestamptz)
+      `,
+      [ipAddress]
+    );
+    const failureCount = Number(result.rows[0]?.failure_count ?? 0);
+    if (failureCount < threshold) {
+      return;
+    }
+
+    await this.database.pool.query(
+      `
+        insert into banned_ips (id, ip_address, reason, source, banned_at, expires_at)
+        values ($1, $2::inet, $3, 'app', now(), null)
+        on conflict (ip_address) do update
+        set reason = excluded.reason,
+            source = excluded.source,
+            banned_at = excluded.banned_at,
+            expires_at = excluded.expires_at
+      `,
+      [randomUUID(), ipAddress, `Too many failed login attempts (${failureCount}/${threshold})`]
+    );
+  }
+
+  private async getLoginFailureThreshold(): Promise<number> {
+    const result = await this.database.pool.query<LoginFailurePolicyRow>(
+      "select login_failures_before_ban from app_settings where id = true"
+    );
+    return result.rows[0]?.login_failures_before_ban ?? 3;
   }
 
   private async writeAuthFailureLog(
