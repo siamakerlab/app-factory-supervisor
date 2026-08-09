@@ -252,6 +252,26 @@ type ProjectsResponse = {
   projects: ProjectSummary[];
 };
 
+type ArtifactSummary = {
+  id: string;
+  projectId: string | null;
+  runId: string | null;
+  artifactType: string;
+  path: string;
+  sha256: string | null;
+  sizeBytes: number | null;
+  redacted: boolean;
+  retentionClass: string;
+  compressedAt: string | null;
+  verifiedAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+};
+
+type ArtifactsResponse = {
+  artifacts: ArtifactSummary[];
+};
+
 type SettingsTab =
   | "user"
   | "email"
@@ -316,6 +336,7 @@ export function App() {
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
@@ -358,7 +379,8 @@ export function App() {
         codexDocsResponse,
         toolchainResponse,
         capabilityResponse,
-        projectsResponse
+        projectsResponse,
+        artifactsResponse
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
@@ -366,7 +388,8 @@ export function App() {
         fetch("/api/codex/docs", { credentials: "include" }),
         fetch("/api/toolchain/status", { credentials: "include" }),
         fetch("/api/capabilities/status", { credentials: "include" }),
-        fetch("/api/projects", { credentials: "include" })
+        fetch("/api/projects", { credentials: "include" }),
+        fetch("/api/artifacts?limit=12", { credentials: "include" })
       ]);
       if (
         !settingsResponse.ok ||
@@ -375,7 +398,8 @@ export function App() {
         !codexDocsResponse.ok ||
         !toolchainResponse.ok ||
         !capabilityResponse.ok ||
-        !projectsResponse.ok
+        !projectsResponse.ok ||
+        !artifactsResponse.ok
       ) {
         setApiState("error");
         return;
@@ -387,6 +411,7 @@ export function App() {
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
       setProjects(((await projectsResponse.json()) as ProjectsResponse).projects);
+      setArtifacts(((await artifactsResponse.json()) as ArtifactsResponse).artifacts);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -656,6 +681,14 @@ export function App() {
               <CheckCircle2 size={18} />
             </div>
             <KeyValueList className="readiness-grid" rows={readiness} />
+          </div>
+
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Recent Artifacts</h2>
+              <Database size={18} />
+            </div>
+            <ArtifactTable artifacts={artifacts} />
           </div>
         </section>
 
@@ -1298,6 +1331,45 @@ function CapabilityInventory({ capabilities }: { capabilities: CapabilityRespons
       </div>
     </div>
   );
+}
+
+function ArtifactTable({ artifacts }: { artifacts: ArtifactSummary[] }) {
+  if (artifacts.length === 0) {
+    return <p className="muted-copy">No artifacts have been recorded yet.</p>;
+  }
+  return (
+    <div className="artifact-table">
+      <div className="artifact-row artifact-head">
+        <span>Type</span>
+        <span>Size</span>
+        <span>Retention</span>
+        <span>Hash</span>
+        <span>Content</span>
+      </div>
+      {artifacts.map((artifact) => (
+        <div className="artifact-row" key={artifact.id}>
+          <span title={artifact.path}>{artifact.artifactType}</span>
+          <span>{formatBytes(artifact.sizeBytes)}</span>
+          <span>{artifact.retentionClass}</span>
+          <span title={artifact.sha256 ?? "No hash"}>{artifact.sha256?.slice(0, 12) ?? "none"}</span>
+          <a href={`/api/artifacts/${artifact.id}/content`}>Download</a>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatBytes(value: number | null): string {
+  if (value === null) {
+    return "unknown";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 102.4) / 10} KB`;
+  }
+  return `${Math.round(value / 1024 / 102.4) / 10} MB`;
 }
 
 function capabilityTypeLabel(

@@ -1,4 +1,6 @@
 import { buildServer } from "./app.js";
+import { registerArtifactRoutes } from "./artifacts/routes.js";
+import { ArtifactService } from "./artifacts/service.js";
 import { AuthService } from "./auth/service.js";
 import { registerCapabilityRoutes } from "./capabilities/routes.js";
 import { CapabilityService } from "./capabilities/service.js";
@@ -25,6 +27,7 @@ const readiness = {
   migrated: false
 };
 const settingsService = new SettingsService(database);
+const artifactService = new ArtifactService(database, config);
 const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
@@ -44,6 +47,7 @@ registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
 registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
 registerProjectRoutes(server, projectService, gitAutomationService);
+registerArtifactRoutes(server, artifactService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

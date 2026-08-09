@@ -553,6 +553,24 @@ create table if not exists project_git_automation_events (
 create index if not exists idx_project_git_automation_events_project_created
   on project_git_automation_events(project_id, created_at desc);
 `
+  },
+  {
+    id: "0008_artifact_storage_metadata",
+    description: "Add artifact storage retention and verification metadata",
+    sql: `
+alter table artifacts
+  add column if not exists retention_class text not null default 'run_log',
+  add column if not exists compressed_at timestamptz,
+  add column if not exists verified_at timestamptz,
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists idx_artifacts_created
+  on artifacts(created_at desc);
+
+create index if not exists idx_artifacts_retention
+  on artifacts(retention_class, created_at)
+  where deleted_at is null;
+`
   }
 ];
 
@@ -607,5 +625,7 @@ export const expectedMvpIndexes = [
   "idx_codex_compatibility_reviews_created",
   "idx_toolchain_install_runs_started",
   "idx_capability_install_runs_started",
-  "idx_project_git_automation_events_project_created"
+  "idx_project_git_automation_events_project_created",
+  "idx_artifacts_created",
+  "idx_artifacts_retention"
 ] as const;
