@@ -15,7 +15,8 @@ const publicRoutes = new Set([
   "GET /health",
   "GET /api/setup/status",
   "POST /api/setup/admin",
-  "POST /api/auth/login"
+  "POST /api/auth/login",
+  "POST /api/codex/hooks/stop"
 ]);
 
 export function registerAuthRoutes(

@@ -68,6 +68,43 @@ type Fail2banResponse = {
   }>;
 };
 
+type CodexCompatibilityResponse = {
+  status: "pass" | "fail" | "not_run";
+  codexCliVersion: string | null;
+  codexAuthUsable: boolean;
+  jsonModeSupported: boolean;
+  outputSchemaSupported: boolean;
+  outputLastMessageSupported: boolean;
+  execResumeSupported: boolean;
+  hooksSupported: boolean;
+  appServerTypeScriptSchemasGenerated: boolean;
+  appServerJsonSchemasGenerated: boolean;
+  configValidationPassed: boolean;
+  stopHookCallbackVerified: boolean;
+  jsonlParserRecognizesCurrentEvents: boolean;
+  buildEnvironmentReady: boolean;
+  gapSummary: string;
+  artifactPath: string | null;
+  generatedSchemaPaths: {
+    typeScript: string | null;
+    jsonSchema: string | null;
+  };
+  smokeArtifacts: {
+    jsonl: string | null;
+    stderr: string | null;
+    lastMessage: string | null;
+  };
+  ownership: {
+    codexHomeDir: string;
+    configPath: string;
+    hooksPath: string;
+    configOwner: "app" | "user" | "missing";
+    hooksOwner: "app" | "user" | "missing";
+    conflicts: string[];
+  };
+  createdAt: string | null;
+};
+
 type SetupStatus = {
   adminConfigured: boolean;
   setupComplete: boolean;
@@ -129,18 +166,6 @@ const projects = [
   }
 ];
 
-const buildRows: KeyValueRows = [
-  ["Android SDK", "Not installed"],
-  ["Gradle", "Not installed"],
-  ["JDK", "Not installed"],
-  ["Toolchain snapshots", "None"],
-  ["AVD/emulator", "Not verified"],
-  ["MCP status", "Pending setup"],
-  ["Skill/agent wiring", "Pending setup"],
-  ["Codex CLI/auth/JSONL", "Not verified"],
-  ["Compatibility review", "Not generated"]
-];
-
 const secretRows: KeyValueRows = [
   ["Git SSH public key", "Not generated"],
   ["Uploaded secret files", "None"],
@@ -171,7 +196,11 @@ export function App() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fail2ban, setFail2ban] = useState<Fail2banResponse | null>(null);
+  const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
+    null
+  );
   const [setup, setSetup] = useState<SetupStatus | null>(null);
+  const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -201,19 +230,38 @@ export function App() {
       }
       setSession((await sessionResponse.json()) as SessionResponse);
 
-      const [settingsResponse, fail2banResponse] = await Promise.all([
+      const [settingsResponse, fail2banResponse, codexResponse] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
-        fetch("/api/security/fail2ban", { credentials: "include" })
+        fetch("/api/security/fail2ban", { credentials: "include" }),
+        fetch("/api/codex/compatibility", { credentials: "include" })
       ]);
-      if (!settingsResponse.ok || !fail2banResponse.ok) {
+      if (!settingsResponse.ok || !fail2banResponse.ok || !codexResponse.ok) {
         setApiState("error");
         return;
       }
       setSettings((await settingsResponse.json()) as PublicSettings);
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
+      setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
       setApiState("ready");
     } catch {
       setApiState("error");
+    }
+  }
+
+  async function runCodexCompatibilityReview() {
+    setCodexReviewBusy(true);
+    try {
+      const response = await fetch("/api/codex/compatibility/run", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        setCodexCompatibility((await response.json()) as CodexCompatibilityResponse);
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setCodexReviewBusy(false);
     }
   }
 
@@ -225,6 +273,10 @@ export function App() {
       ["Exports", "Planned"]
     ],
     [apiState]
+  );
+  const buildEnvironmentRows = useMemo<KeyValueRows>(
+    () => createBuildRows(codexCompatibility),
+    [codexCompatibility]
   );
 
   return (
@@ -321,9 +373,15 @@ export function App() {
           <div id="build-environment" className="panel">
             <div className="panel-heading">
               <h2>Build Environment</h2>
-              <ServerCog size={18} />
+              <button
+                type="button"
+                disabled={apiState !== "ready" || codexReviewBusy}
+                onClick={() => void runCodexCompatibilityReview()}
+              >
+                {codexReviewBusy ? "Checking" : "Verify Codex"}
+              </button>
             </div>
-            <KeyValueList rows={buildRows.slice(0, 4)} />
+            <KeyValueList rows={buildEnvironmentRows.slice(0, 4)} />
           </div>
 
           <div className="panel">
@@ -376,7 +434,15 @@ export function App() {
             </div>
 
             <div className="settings-panel" role="tabpanel">
-              {renderSettingsTab(activeTab, settings, session, fail2ban, apiState)}
+              {renderSettingsTab(
+                activeTab,
+                settings,
+                session,
+                fail2ban,
+                codexCompatibility,
+                buildEnvironmentRows,
+                apiState
+              )}
             </div>
           </div>
         </section>
@@ -568,6 +634,8 @@ function renderSettingsTab(
   settings: PublicSettings | null,
   session: SessionResponse | null,
   fail2ban: Fail2banResponse | null,
+  codexCompatibility: CodexCompatibilityResponse | null,
+  buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error"
 ) {
   if (apiState !== "ready") {
@@ -602,7 +670,28 @@ function renderSettingsTab(
         />
       );
     case "build":
-      return <SettingsGroup title="Build Environment" rows={buildRows} />;
+      return (
+        <div className="settings-stack">
+          <SettingsGroup title="Build Environment" rows={buildEnvironmentRows} />
+          <SettingsGroup
+            title="Codex Compatibility Review"
+            rows={[
+              ["Review status", codexCompatibility?.status ?? "not_run"],
+              ["Build environment ready", boolLabel(codexCompatibility?.buildEnvironmentReady)],
+              ["Codex CLI version", codexCompatibility?.codexCliVersion ?? "Unknown"],
+              ["JSON mode", boolLabel(codexCompatibility?.jsonModeSupported)],
+              ["Output schema", boolLabel(codexCompatibility?.outputSchemaSupported)],
+              ["Output last message", boolLabel(codexCompatibility?.outputLastMessageSupported)],
+              ["Exec resume", boolLabel(codexCompatibility?.execResumeSupported)],
+              ["Config validation", boolLabel(codexCompatibility?.configValidationPassed)],
+              ["Stop hook callback", boolLabel(codexCompatibility?.stopHookCallbackVerified)],
+              ["Schema artifact", codexCompatibility?.generatedSchemaPaths.jsonSchema ?? "Unavailable"],
+              ["Review artifact", codexCompatibility?.artifactPath ?? "Unavailable"],
+              ["Gap summary", codexCompatibility?.gapSummary ?? "Review has not run."]
+            ]}
+          />
+        </div>
+      );
     case "credentials":
       return <SettingsGroup title="Credentials And Secrets" rows={secretRows} />;
     case "defaults":
@@ -668,6 +757,45 @@ function renderSettingsTab(
         </div>
       );
   }
+}
+
+function createBuildRows(codexCompatibility: CodexCompatibilityResponse | null): KeyValueRows {
+  return [
+    ["Android SDK", "Not installed"],
+    ["Gradle", "Not installed"],
+    ["JDK", "Not installed"],
+    ["Toolchain snapshots", "None"],
+    ["AVD/emulator", "Not verified"],
+    ["MCP status", "Pending setup"],
+    ["Skill/agent wiring", "Pending setup"],
+    ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],
+    ["Compatibility review", codexCompatibility?.status ?? "Not run"],
+    ["Managed config", codexCompatibility?.ownership.configOwner ?? "missing"],
+    ["Managed hooks", codexCompatibility?.ownership.hooksOwner ?? "missing"],
+    [
+      "Ownership conflicts",
+      codexCompatibility?.ownership.conflicts.length
+        ? codexCompatibility.ownership.conflicts.join("; ")
+        : "None"
+    ]
+  ];
+}
+
+function codexRuntimeLabel(codexCompatibility: CodexCompatibilityResponse | null): string {
+  if (!codexCompatibility || codexCompatibility.status === "not_run") {
+    return "Not verified";
+  }
+  if (!codexCompatibility.codexAuthUsable) {
+    return "Auth missing or expired";
+  }
+  return codexCompatibility.buildEnvironmentReady ? "Ready" : "Partial";
+}
+
+function boolLabel(value: boolean | undefined): string {
+  if (value === undefined) {
+    return "Unknown";
+  }
+  return value ? "Pass" : "Fail";
 }
 
 function SettingsGroup({ title, rows }: { title: string; rows: KeyValueRows }) {

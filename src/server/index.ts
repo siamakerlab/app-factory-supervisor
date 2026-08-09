@@ -1,5 +1,7 @@
 import { buildServer } from "./app.js";
 import { AuthService } from "./auth/service.js";
+import { CodexCompatibilityService } from "./codex/compatibility.js";
+import { registerCodexRoutes } from "./codex/routes.js";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
@@ -17,6 +19,7 @@ const readiness = {
 const settingsService = new SettingsService(database);
 const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
+const codexCompatibilityService = new CodexCompatibilityService(database, config);
 const server = await buildServer({
   readiness,
   authService,
@@ -24,6 +27,7 @@ const server = await buildServer({
 });
 registerFail2banRoutes(server, database);
 registerSetupRoutes(server, setupService);
+registerCodexRoutes(server, codexCompatibilityService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

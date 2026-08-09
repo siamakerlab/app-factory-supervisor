@@ -467,6 +467,17 @@ insert into setup_wizard_state (id, updated_at)
 values (true, now())
 on conflict (id) do nothing;
 `
+  },
+  {
+    id: "0004_codex_compatibility_metadata",
+    description: "Add Codex compatibility review metadata",
+    sql: `
+alter table codex_compatibility_reviews
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
+
+create index if not exists idx_codex_compatibility_reviews_created
+  on codex_compatibility_reviews(created_at desc);
+`
   }
 ];
 
@@ -514,5 +525,6 @@ export const expectedMvpIndexes = [
   "idx_project_exports_project_status",
   "idx_verification_project_created",
   "idx_market_research_project_source",
-  "idx_progress_gates_project_status"
+  "idx_progress_gates_project_status",
+  "idx_codex_compatibility_reviews_created"
 ] as const;
