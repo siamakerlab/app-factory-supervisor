@@ -1,0 +1,40 @@
+services:
+  app:
+    image: node:24-bookworm
+    working_dir: /workspace
+    command: sh -c "npm install && npm run build && npm run start"
+    environment:
+      NODE_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: 3000
+      DATABASE_URL: postgres://app_factory:app_factory@postgres:5432/app_factory_supervisor
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/workspace
+      - app_data:/workspace/data
+      - app_projects:/workspace/projects
+      - app_node_modules:/workspace/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: app_factory
+      POSTGRES_PASSWORD: app_factory
+      POSTGRES_DB: app_factory_supervisor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_factory -d app_factory_supervisor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  app_data:
+  app_projects:
+  app_node_modules:
+  postgres_data:

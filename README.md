@@ -70,6 +70,23 @@ docker compose up -d
 
 Open the web app and complete the first-run wizard.
 
+For local scaffold development:
+
+```bash
+npm install
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+npm run dev
+```
+
+Validate the Compose file:
+
+```bash
+docker compose config
+```
+
 The first-run wizard is expected to:
 
 - create the single admin account
