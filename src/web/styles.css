@@ -512,6 +512,58 @@ button {
   font: inherit;
 }
 
+.project-wizard {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.wizard-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wizard-form-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.wizard-form-grid label span {
+  color: #526274;
+}
+
+.wizard-form-grid input,
+.wizard-form-grid select,
+.wizard-form-grid textarea {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #bdc8d4;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1d2935;
+  font: inherit;
+}
+
+.wizard-form-grid input,
+.wizard-form-grid select {
+  min-height: 34px;
+}
+
+.wizard-form-grid textarea {
+  resize: vertical;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .form-actions {
   display: flex;
   align-items: center;
@@ -619,5 +671,9 @@ button {
   .mini-row {
     grid-template-columns: 1fr;
     padding: 10px;
+  }
+
+  .wizard-form-grid {
+    grid-template-columns: 1fr;
   }
 }

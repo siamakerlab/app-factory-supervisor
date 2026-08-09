@@ -221,6 +221,34 @@ type SetupStatus = {
   lastError: string | null;
 };
 
+type ProjectSummary = {
+  id: string;
+  projectName: string;
+  appName: string;
+  packageName: string;
+  projectType: "new" | "existing";
+  repositoryUrl: string;
+  projectDir: string;
+  status:
+    | "running"
+    | "production_ready_user_action_required"
+    | "blocked_needs_user"
+    | "failed"
+    | "budget_exhausted"
+    | "cancelled";
+  currentPhase: string;
+  maxExecutionHours: number;
+  maxWorkerTurns: number;
+  remoteReachable: boolean;
+  latestWorkerResponse: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ProjectsResponse = {
+  projects: ProjectSummary[];
+};
+
 type SettingsTab =
   | "user"
   | "email"
@@ -246,15 +274,6 @@ const settingsTabs: Array<{
   { id: "resources", label: "Resource Limits", icon: Activity },
   { id: "security", label: "Security And Safety", icon: Shield },
   { id: "fail2ban", label: "Fail2ban Records", icon: ShieldAlert }
-];
-
-const projects = [
-  {
-    name: "No active project",
-    phase: "Waiting for project wizard",
-    progress: 0,
-    status: "Setup required"
-  }
 ];
 
 const secretRows: KeyValueRows = [
@@ -293,6 +312,8 @@ export function App() {
   const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectWizardOpen, setProjectWizardOpen] = useState(false);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
@@ -333,14 +354,16 @@ export function App() {
         codexResponse,
         codexDocsResponse,
         toolchainResponse,
-        capabilityResponse
+        capabilityResponse,
+        projectsResponse
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
         fetch("/api/codex/docs", { credentials: "include" }),
         fetch("/api/toolchain/status", { credentials: "include" }),
-        fetch("/api/capabilities/status", { credentials: "include" })
+        fetch("/api/capabilities/status", { credentials: "include" }),
+        fetch("/api/projects", { credentials: "include" })
       ]);
       if (
         !settingsResponse.ok ||
@@ -348,7 +371,8 @@ export function App() {
         !codexResponse.ok ||
         !codexDocsResponse.ok ||
         !toolchainResponse.ok ||
-        !capabilityResponse.ok
+        !capabilityResponse.ok ||
+        !projectsResponse.ok
       ) {
         setApiState("error");
         return;
@@ -359,6 +383,7 @@ export function App() {
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
+      setProjects(((await projectsResponse.json()) as ProjectsResponse).projects);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -514,8 +539,23 @@ export function App() {
           <div className="panel wide">
             <div className="panel-heading">
               <h2>Project Queue</h2>
-              <button type="button">New Project</button>
+              <button
+                type="button"
+                disabled={apiState !== "ready"}
+                onClick={() => setProjectWizardOpen((value) => !value)}
+              >
+                {projectWizardOpen ? "Close" : "New Project"}
+              </button>
             </div>
+            {projectWizardOpen ? (
+              <ProjectWizard
+                settings={settings}
+                onCreated={() => {
+                  setProjectWizardOpen(false);
+                  void loadApiState();
+                }}
+              />
+            ) : null}
             <div className="table">
               <div className="table-row table-head">
                 <span>Project</span>
@@ -523,16 +563,30 @@ export function App() {
                 <span>Progress</span>
                 <span>Status</span>
               </div>
-              {projects.map((project) => (
-                <div className="table-row" key={project.name}>
-                  <span>{project.name}</span>
-                  <span>{project.phase}</span>
+              {projects.length === 0 ? (
+                <div className="table-row">
+                  <span>No active project</span>
+                  <span>Waiting for project wizard</span>
                   <span>
                     <span className="progress-track">
-                      <span style={{ width: `${project.progress}%` }} />
+                      <span style={{ width: "0%" }} />
                     </span>
                   </span>
-                  <span className="chip muted">{project.status}</span>
+                  <span className="chip muted">Setup required</span>
+                </div>
+              ) : null}
+              {projects.map((project) => (
+                <div className="table-row" key={project.id}>
+                  <span>{project.projectName}</span>
+                  <span>{project.currentPhase}</span>
+                  <span>
+                    <span className="progress-track">
+                      <span style={{ width: `${projectProgress(project)}%` }} />
+                    </span>
+                  </span>
+                  <span className={project.status === "running" ? "chip" : "chip muted"}>
+                    {project.status}
+                  </span>
                 </div>
               ))}
             </div>
@@ -748,6 +802,150 @@ function StepHeader({
   );
 }
 
+function ProjectWizard({
+  settings,
+  onCreated
+}: {
+  settings: PublicSettings | null;
+  onCreated: () => void;
+}) {
+  const [projectName, setProjectName] = useState("");
+  const [appName, setAppName] = useState("");
+  const [packageName, setPackageName] = useState("com.example.app");
+  const [userAppPlan, setUserAppPlan] = useState("");
+  const [projectType, setProjectType] = useState<"new" | "existing">("new");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [globalGitUserName, setGlobalGitUserName] = useState("");
+  const [globalGitUserEmail, setGlobalGitUserEmail] = useState("");
+  const [maxExecutionHours, setMaxExecutionHours] = useState(
+    `${settings?.defaultMaxExecutionHours ?? 24}`
+  );
+  const [maxWorkerTurns, setMaxWorkerTurns] = useState(`${settings?.defaultMaxWorkerTurns ?? 200}`);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [message, setMessage] = useState("New projects generate a release keystore. Existing projects upload it later.");
+
+  async function submitProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("saving");
+    const response = await fetch("/api/projects", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        projectName,
+        appName,
+        packageName,
+        userAppPlan,
+        projectType,
+        repositoryUrl,
+        globalGitUserName,
+        globalGitUserEmail,
+        maxExecutionHours: Number(maxExecutionHours),
+        maxWorkerTurns: Number(maxWorkerTurns)
+      })
+    });
+    if (!response.ok) {
+      setStatus("error");
+      setMessage("Project creation failed. Check required fields and Git access.");
+      return;
+    }
+    const created = (await response.json()) as ProjectSummary & {
+      gitStatus: { remoteReachable: boolean };
+      keystore: { created: boolean };
+    };
+    setStatus("saved");
+    setMessage(
+      created.gitStatus.remoteReachable
+        ? "Project created and Git remote verified."
+        : "Project created, but Git access needs user action before automation can run."
+    );
+    onCreated();
+  }
+
+  return (
+    <form className="project-wizard" onSubmit={(event) => void submitProject(event)}>
+      <div className="wizard-form-grid">
+        <label>
+          <span>Project name</span>
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+        </label>
+        <label>
+          <span>App name</span>
+          <input value={appName} onChange={(event) => setAppName(event.target.value)} />
+        </label>
+        <label>
+          <span>Package name</span>
+          <input value={packageName} onChange={(event) => setPackageName(event.target.value)} />
+        </label>
+        <label>
+          <span>Project type</span>
+          <select
+            value={projectType}
+            onChange={(event) => setProjectType(event.target.value as "new" | "existing")}
+          >
+            <option value="new">New project</option>
+            <option value="existing">Existing project</option>
+          </select>
+        </label>
+        <label className="wide-field">
+          <span>{projectType === "new" ? "Empty repository URL" : "Existing repository URL"}</span>
+          <input value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} />
+        </label>
+        <label>
+          <span>Git user.name</span>
+          <input
+            value={globalGitUserName}
+            onChange={(event) => setGlobalGitUserName(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Git user.email</span>
+          <input
+            value={globalGitUserEmail}
+            onChange={(event) => setGlobalGitUserEmail(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max execution hours</span>
+          <input
+            type="number"
+            min="1"
+            max="720"
+            value={maxExecutionHours}
+            onChange={(event) => setMaxExecutionHours(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Max worker turns</span>
+          <input
+            type="number"
+            min="1"
+            max="2000"
+            value={maxWorkerTurns}
+            onChange={(event) => setMaxWorkerTurns(event.target.value)}
+          />
+        </label>
+        <label className="wide-field">
+          <span>User app plan</span>
+          <textarea
+            value={userAppPlan}
+            onChange={(event) => setUserAppPlan(event.target.value)}
+            rows={5}
+          />
+        </label>
+      </div>
+      <div className="form-actions">
+        <button type="submit" disabled={status === "saving"}>
+          {status === "saving" ? "Creating" : "Create Project"}
+        </button>
+        <span>{message}</span>
+      </div>
+    </form>
+  );
+}
+
 function CreateAdminForm({
   busy,
   setBusy,
@@ -821,6 +1019,28 @@ function CreateAdminForm({
       </div>
     </form>
   );
+}
+
+function projectProgress(project: ProjectSummary): number {
+  if (project.status === "production_ready_user_action_required") {
+    return 100;
+  }
+  if (project.status === "blocked_needs_user") {
+    return 5;
+  }
+  const phaseWeights: Record<string, number> = {
+    "product definition": 5,
+    "market review": 12,
+    "roadmap planning": 20,
+    "UX planning": 28,
+    implementation: 55,
+    "gap review": 68,
+    "QA planning": 75,
+    "emulator verification": 86,
+    "code review": 93,
+    "production ready": 100
+  };
+  return phaseWeights[project.currentPhase] ?? 0;
 }
 
 function renderSettingsTab(
