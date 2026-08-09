@@ -30,6 +30,19 @@ export function registerProjectRoutes(
   });
 
   server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId",
+    async (request, reply) => {
+      const project = await projectService.getProjectDetail(request.params.projectId);
+      if (!project) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return project;
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/git/events",
     async (request) => ({
       events: await gitAutomationService.getEvents(request.params.projectId)

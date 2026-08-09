@@ -51,6 +51,90 @@ export type CreatedProject = ProjectSummary & {
   };
 };
 
+export type ProjectDetail = ProjectSummary & {
+  progress: {
+    totalGates: number;
+    completedGates: number;
+    percent: number;
+    gates: ProgressGateSummary[];
+  };
+  timeline: TimelineEventSummary[];
+  latestWorkerResponse: string | null;
+  currentSupervisorPrompt: string | null;
+  verification: {
+    overallStatus: "unknown" | "pass" | "fail" | "mixed";
+    recent: VerificationSummary[];
+  };
+  userRequiredItems: UserRequiredItemSummary[];
+  recentArtifacts: ProjectArtifactSummary[];
+  recentExports: ProjectExportSummary[];
+  finalStatusSummary: string;
+};
+
+export type ProgressGateSummary = {
+  key: string;
+  label: string;
+  phase: string;
+  status: "pending" | "pass" | "fail" | "blocked" | "skipped";
+  weight: number;
+  evidenceArtifactId: string | null;
+  updatedAt: string;
+};
+
+export type TimelineEventSummary = {
+  id: string;
+  runId: string | null;
+  iteration: number | null;
+  eventType: "supervisor_prompt_sent" | "worker_final_response";
+  title: string;
+  body: string | null;
+  artifactId: string | null;
+  createdAt: string;
+};
+
+export type VerificationSummary = {
+  id: string;
+  runId: string | null;
+  checkType: string;
+  status: "pass" | "fail" | "skipped";
+  command: string | null;
+  summary: string | null;
+  artifactId: string | null;
+  createdAt: string;
+};
+
+export type UserRequiredItemSummary = {
+  key: string;
+  label: string;
+  status: "needed" | "provided" | "pass" | "failed" | "blocked";
+  requiredForProduction: boolean;
+  canContinueWithoutIt: boolean;
+  secret: boolean;
+  lastValidation: string | null;
+  updatedAt: string;
+};
+
+export type ProjectArtifactSummary = {
+  id: string;
+  runId: string | null;
+  artifactType: string;
+  path: string;
+  sizeBytes: number | null;
+  redacted: boolean;
+  createdAt: string;
+};
+
+export type ProjectExportSummary = {
+  id: string;
+  status: "queued" | "running" | "ready" | "failed" | "expired" | "deleted";
+  artifactId: string | null;
+  fileCount: number | null;
+  sizeBytes: number | null;
+  errorSummary: string | null;
+  requestedAt: string;
+  finishedAt: string | null;
+};
+
 type ProjectRow = {
   id: string;
   project_name: string;
@@ -70,6 +154,70 @@ type ProjectRow = {
   created_at: Date;
   updated_at: Date;
   remote_reachable: boolean | null;
+};
+
+type ProgressGateRow = {
+  gate_key: string;
+  label: string;
+  phase: string;
+  status: ProgressGateSummary["status"];
+  weight: number;
+  evidence_artifact_id: string | null;
+  updated_at: Date;
+};
+
+type TimelineEventRow = {
+  id: string;
+  run_id: string | null;
+  iteration: number | null;
+  event_type: TimelineEventSummary["eventType"];
+  title: string;
+  body: string | null;
+  artifact_id: string | null;
+  created_at: Date;
+};
+
+type VerificationRow = {
+  id: string;
+  run_id: string | null;
+  check_type: string;
+  status: VerificationSummary["status"];
+  command: string | null;
+  summary: string | null;
+  artifact_id: string | null;
+  created_at: Date;
+};
+
+type UserRequiredItemRow = {
+  item_key: string;
+  label: string;
+  status: UserRequiredItemSummary["status"];
+  required_for_production: boolean;
+  can_continue_without_it: boolean;
+  secret: boolean;
+  last_validation: string | null;
+  updated_at: Date;
+};
+
+type ProjectArtifactRow = {
+  id: string;
+  run_id: string | null;
+  artifact_type: string;
+  path: string;
+  size_bytes: string | number | null;
+  redacted: boolean;
+  created_at: Date;
+};
+
+type ProjectExportRow = {
+  id: string;
+  status: ProjectExportSummary["status"];
+  artifact_id: string | null;
+  file_count: number | null;
+  size_bytes: string | number | null;
+  error_summary: string | null;
+  requested_at: Date;
+  finished_at: Date | null;
 };
 
 type SettingsRow = {
@@ -242,6 +390,52 @@ export class ProjectService {
     };
   }
 
+  async getProjectDetail(id: string): Promise<ProjectDetail | null> {
+    const project = await this.getProject(id);
+    if (!project) {
+      return null;
+    }
+    const [gates, timeline, verification, userRequiredItems, recentArtifacts, recentExports] =
+      await Promise.all([
+        this.getProgressGates(id),
+        this.getTimeline(id),
+        this.getVerification(id),
+        this.getUserRequiredItems(id),
+        this.getRecentArtifacts(id),
+        this.getRecentExports(id)
+      ]);
+    const completedGates = gates.filter((gate) => gate.status === "pass" || gate.status === "skipped").length;
+    const percent = gates.length > 0 ? Math.round((completedGates / gates.length) * 100) : 0;
+    const latestWorkerResponse =
+      timeline
+        .filter((event) => event.eventType === "worker_final_response")
+        .at(-1)?.body ?? project.latestWorkerResponse;
+    const currentSupervisorPrompt =
+      timeline
+        .filter((event) => event.eventType === "supervisor_prompt_sent")
+        .at(-1)?.body ?? null;
+    return {
+      ...project,
+      progress: {
+        totalGates: gates.length,
+        completedGates,
+        percent,
+        gates
+      },
+      timeline,
+      latestWorkerResponse,
+      currentSupervisorPrompt,
+      verification: {
+        overallStatus: verificationStatus(verification),
+        recent: verification
+      },
+      userRequiredItems,
+      recentArtifacts,
+      recentExports,
+      finalStatusSummary: finalStatusSummary(project, percent, userRequiredItems, verification)
+    };
+  }
+
   private async getProject(id: string): Promise<ProjectSummary | null> {
     const result = await this.database.pool.query<ProjectRow>(
       `
@@ -265,6 +459,143 @@ export class ProjectService {
       throw new Error("app_settings singleton row is missing");
     }
     return result.rows[0];
+  }
+
+  private async getProgressGates(projectId: string): Promise<ProgressGateSummary[]> {
+    const result = await this.database.pool.query<ProgressGateRow>(
+      `
+        select gate_key, label, phase, status, weight, evidence_artifact_id, updated_at
+        from progress_gates
+        where project_id = $1
+        order by updated_at asc, gate_key asc
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      key: row.gate_key,
+      label: row.label,
+      phase: row.phase,
+      status: row.status,
+      weight: row.weight,
+      evidenceArtifactId: row.evidence_artifact_id,
+      updatedAt: row.updated_at.toISOString()
+    }));
+  }
+
+  private async getTimeline(projectId: string): Promise<TimelineEventSummary[]> {
+    const result = await this.database.pool.query<TimelineEventRow>(
+      `
+        select id, run_id, iteration, event_type, title, body, artifact_id, created_at
+        from timeline_events
+        where project_id = $1
+          and event_type in ('supervisor_prompt_sent', 'worker_final_response')
+        order by created_at asc, iteration asc nulls last
+        limit 200
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      runId: row.run_id,
+      iteration: row.iteration,
+      eventType: row.event_type,
+      title: row.title,
+      body: row.body,
+      artifactId: row.artifact_id,
+      createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  private async getVerification(projectId: string): Promise<VerificationSummary[]> {
+    const result = await this.database.pool.query<VerificationRow>(
+      `
+        select id, run_id, check_type, status, command, summary, artifact_id, created_at
+        from verification_results
+        where project_id = $1
+        order by created_at desc
+        limit 20
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      runId: row.run_id,
+      checkType: row.check_type,
+      status: row.status,
+      command: row.command,
+      summary: row.summary,
+      artifactId: row.artifact_id,
+      createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  private async getUserRequiredItems(projectId: string): Promise<UserRequiredItemSummary[]> {
+    const result = await this.database.pool.query<UserRequiredItemRow>(
+      `
+        select item_key, label, status, required_for_production, can_continue_without_it,
+          secret, last_validation, updated_at
+        from user_required_items
+        where project_id = $1
+        order by required_for_production desc, can_continue_without_it asc, item_key asc
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      key: row.item_key,
+      label: row.label,
+      status: row.status,
+      requiredForProduction: row.required_for_production,
+      canContinueWithoutIt: row.can_continue_without_it,
+      secret: row.secret,
+      lastValidation: row.last_validation,
+      updatedAt: row.updated_at.toISOString()
+    }));
+  }
+
+  private async getRecentArtifacts(projectId: string): Promise<ProjectArtifactSummary[]> {
+    const result = await this.database.pool.query<ProjectArtifactRow>(
+      `
+        select id, run_id, artifact_type, path, size_bytes, redacted, created_at
+        from artifacts
+        where project_id = $1 and deleted_at is null
+        order by created_at desc
+        limit 12
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      runId: row.run_id,
+      artifactType: row.artifact_type,
+      path: row.path,
+      sizeBytes: row.size_bytes === null ? null : Number(row.size_bytes),
+      redacted: row.redacted,
+      createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  private async getRecentExports(projectId: string): Promise<ProjectExportSummary[]> {
+    const result = await this.database.pool.query<ProjectExportRow>(
+      `
+        select id, status, artifact_id, file_count, size_bytes, error_summary,
+          requested_at, finished_at
+        from project_exports
+        where project_id = $1
+        order by requested_at desc
+        limit 8
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      artifactId: row.artifact_id,
+      fileCount: row.file_count,
+      sizeBytes: row.size_bytes === null ? null : Number(row.size_bytes),
+      errorSummary: row.error_summary,
+      requestedAt: row.requested_at.toISOString(),
+      finishedAt: row.finished_at?.toISOString() ?? null
+    }));
   }
 
   private async writeGitConfig(gitHome: string, userName: string, userEmail: string): Promise<void> {
@@ -521,6 +852,46 @@ function mapProjectRow(row: ProjectRow): ProjectSummary {
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString()
   };
+}
+
+function verificationStatus(
+  verification: VerificationSummary[]
+): ProjectDetail["verification"]["overallStatus"] {
+  if (verification.length === 0) {
+    return "unknown";
+  }
+  const statuses = new Set(verification.map((item) => item.status));
+  if (statuses.has("fail")) {
+    return statuses.has("pass") ? "mixed" : "fail";
+  }
+  if (statuses.has("pass")) {
+    return "pass";
+  }
+  return "unknown";
+}
+
+function finalStatusSummary(
+  project: ProjectSummary,
+  progressPercent: number,
+  userRequiredItems: UserRequiredItemSummary[],
+  verification: VerificationSummary[]
+): string {
+  if (project.status === "production_ready_user_action_required") {
+    const openUserItems = userRequiredItems.filter((item) =>
+      ["needed", "failed", "blocked"].includes(item.status)
+    );
+    return openUserItems.length > 0
+      ? `Production-level implementation is ready; ${openUserItems.length} user-owned item(s) remain.`
+      : "Production-level implementation is ready; final user-owned store and policy actions may remain.";
+  }
+  const failedVerification = verification.some((item) => item.status === "fail");
+  if (failedVerification) {
+    return "Verification has failing evidence; worker review and fixes are still required.";
+  }
+  if (project.status === "blocked_needs_user") {
+    return "Automation is blocked until required user action is completed.";
+  }
+  return `Project is in ${project.currentPhase}; ${progressPercent}% of progress gates are complete.`;
 }
 
 function initialSupervisorPrompt(input: CreateProjectInput): string {

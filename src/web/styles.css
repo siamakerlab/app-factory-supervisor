@@ -210,11 +210,21 @@ button {
   font-size: 13px;
 }
 
+.table-row.selected {
+  background: #eef7f5;
+}
+
 .table-row button {
   min-height: 28px;
   padding: 0 8px;
   border-radius: 6px;
   font-size: 12px;
+}
+
+.table-row span:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .table-row:first-child {
@@ -242,6 +252,10 @@ button {
   display: block;
   height: 100%;
   background: #218b82;
+}
+
+.progress-track.large {
+  height: 12px;
 }
 
 .chip {
@@ -307,6 +321,123 @@ button {
   align-items: start;
   color: #3d4a57;
   font-size: 13px;
+}
+
+.project-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.detail-summary,
+.detail-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.gate-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.gate-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #d6dee8;
+  border-radius: 6px;
+  color: #405061;
+  background: #f7f9fb;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.gate-pill.pass,
+.gate-pill.skipped {
+  border-color: #9fd2c8;
+  color: #155d55;
+  background: #e8f6f3;
+}
+
+.gate-pill.fail,
+.gate-pill.blocked {
+  border-color: #efb3b3;
+  color: #8f2424;
+  background: #fff0f0;
+}
+
+.panel-heading.compact {
+  margin-bottom: 8px;
+}
+
+.panel-heading.compact h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.message-box {
+  min-height: 88px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #d8e0ea;
+  border-radius: 6px;
+  color: #314050;
+  background: #f8fafc;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.run-history {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-history li {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-left: 3px solid #94a3b8;
+  background: #f8fafc;
+}
+
+.run-history li.supervisor {
+  border-left-color: #218b82;
+}
+
+.run-history li.worker {
+  border-left-color: #4d6fa9;
+}
+
+.run-history li div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.run-history li p {
+  margin: 0;
+  color: #344455;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.mini-table.dense .mini-row {
+  grid-template-columns: 1fr 0.7fr 1.2fr;
+  min-height: 32px;
 }
 
 .settings-section {

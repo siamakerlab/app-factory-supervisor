@@ -266,6 +266,73 @@ type ProjectsResponse = {
   projects: ProjectSummary[];
 };
 
+type ProjectDetail = ProjectSummary & {
+  progress: {
+    totalGates: number;
+    completedGates: number;
+    percent: number;
+    gates: Array<{
+      key: string;
+      label: string;
+      phase: string;
+      status: "pending" | "pass" | "fail" | "blocked" | "skipped";
+      evidenceArtifactId: string | null;
+      updatedAt: string;
+    }>;
+  };
+  timeline: Array<{
+    id: string;
+    runId: string | null;
+    iteration: number | null;
+    eventType: "supervisor_prompt_sent" | "worker_final_response";
+    title: string;
+    body: string | null;
+    artifactId: string | null;
+    createdAt: string;
+  }>;
+  currentSupervisorPrompt: string | null;
+  verification: {
+    overallStatus: "unknown" | "pass" | "fail" | "mixed";
+    recent: Array<{
+      id: string;
+      checkType: string;
+      status: "pass" | "fail" | "skipped";
+      summary: string | null;
+      artifactId: string | null;
+      createdAt: string;
+    }>;
+  };
+  userRequiredItems: Array<{
+    key: string;
+    label: string;
+    status: "needed" | "provided" | "pass" | "failed" | "blocked";
+    requiredForProduction: boolean;
+    canContinueWithoutIt: boolean;
+    secret: boolean;
+    lastValidation: string | null;
+  }>;
+  recentArtifacts: Array<{
+    id: string;
+    runId: string | null;
+    artifactType: string;
+    path: string;
+    sizeBytes: number | null;
+    redacted: boolean;
+    createdAt: string;
+  }>;
+  recentExports: Array<{
+    id: string;
+    status: "queued" | "running" | "ready" | "failed" | "expired" | "deleted";
+    artifactId: string | null;
+    fileCount: number | null;
+    sizeBytes: number | null;
+    errorSummary: string | null;
+    requestedAt: string;
+    finishedAt: string | null;
+  }>;
+  finalStatusSummary: string;
+};
+
 type ArtifactSummary = {
   id: string;
   projectId: string | null;
@@ -430,6 +497,8 @@ export function App() {
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
   const [projectExports, setProjectExports] = useState<ProjectExportSummary[]>([]);
   const [jobsStatus, setJobsStatus] = useState<JobsStatusResponse | null>(null);
@@ -447,6 +516,12 @@ export function App() {
   useEffect(() => {
     void loadApiState();
   }, []);
+
+  useEffect(() => {
+    if (apiState === "ready" && selectedProjectId) {
+      void loadProjectDetail(selectedProjectId);
+    }
+  }, [apiState, selectedProjectId]);
 
   async function loadApiState() {
     try {
@@ -517,7 +592,9 @@ export function App() {
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
-      setProjects(((await projectsResponse.json()) as ProjectsResponse).projects);
+      const loadedProjects = ((await projectsResponse.json()) as ProjectsResponse).projects;
+      setProjects(loadedProjects);
+      setSelectedProjectId((current) => current ?? loadedProjects[0]?.id ?? null);
       setArtifacts(((await artifactsResponse.json()) as ArtifactsResponse).artifacts);
       setProjectExports(((await exportsResponse.json()) as ProjectExportsResponse).exports);
       setJobsStatus((await jobsResponse.json()) as JobsStatusResponse);
@@ -525,6 +602,15 @@ export function App() {
     } catch {
       setApiState("error");
     }
+  }
+
+  async function loadProjectDetail(projectId: string) {
+    const response = await fetch(`/api/projects/${projectId}`, { credentials: "include" });
+    if (!response.ok) {
+      setProjectDetail(null);
+      return;
+    }
+    setProjectDetail((await response.json()) as ProjectDetail);
   }
 
   async function runCodexCompatibilityReview() {
@@ -608,6 +694,7 @@ export function App() {
       }
       await response.json();
       await loadApiState();
+      await loadProjectDetail(projectId);
     } finally {
       setExportBusyProjectId(null);
     }
@@ -737,12 +824,19 @@ export function App() {
                 </div>
               ) : null}
               {projects.map((project) => (
-                <div className="table-row" key={project.id}>
+                <div
+                  className={selectedProjectId === project.id ? "table-row selected" : "table-row"}
+                  key={project.id}
+                >
                   <span>{project.projectName}</span>
                   <span>{project.currentPhase}</span>
                   <span>
                     <span className="progress-track">
-                      <span style={{ width: `${projectProgress(project)}%` }} />
+                      <span
+                        style={{
+                          width: `${projectDetail?.id === project.id ? projectDetail.progress.percent : projectProgress(project)}%`
+                        }}
+                      />
                     </span>
                   </span>
                   <span title={versionTitle(project)}>{project.currentVersion ?? "No version"}</span>
@@ -750,6 +844,12 @@ export function App() {
                     {project.status}
                   </span>
                   <span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProjectId(project.id)}
+                    >
+                      Detail
+                    </button>
                     <button
                       type="button"
                       disabled={exportBusyProjectId === project.id}
@@ -761,6 +861,24 @@ export function App() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Project Detail</h2>
+              <span className="chip muted">
+                {projectDetail ? `${projectDetail.progress.percent}% gates` : "No project selected"}
+              </span>
+            </div>
+            {projectDetail ? (
+              <ProjectDetailPanel
+                project={projectDetail}
+                exportBusy={exportBusyProjectId === projectDetail.id}
+                onExport={() => void requestProjectExport(projectDetail.id)}
+              />
+            ) : (
+              <p className="muted-copy">Select a project to inspect progress, timeline, and artifacts.</p>
+            )}
           </div>
 
           <div id="build-environment" className="panel">
@@ -994,6 +1112,177 @@ function StepHeader({
       <span>{number}</span>
       <strong>{title}</strong>
       <em>{status}</em>
+    </div>
+  );
+}
+
+function ProjectDetailPanel({
+  project,
+  exportBusy,
+  onExport
+}: {
+  project: ProjectDetail;
+  exportBusy: boolean;
+  onExport: () => void;
+}) {
+  const latestWorker = project.latestWorkerResponse ?? "No worker response yet.";
+  return (
+    <div className="project-detail">
+      <div className="detail-summary">
+        <KeyValueList
+          rows={[
+            ["App", project.appName],
+            ["Package", project.packageName],
+            ["Repository", project.repositoryUrl],
+            ["Current phase", project.currentPhase],
+            ["Verification", project.verification.overallStatus],
+            ["Final status", project.finalStatusSummary]
+          ]}
+        />
+        <div>
+          <div className="progress-header">
+            <strong>
+              {project.progress.completedGates}/{project.progress.totalGates} gates
+            </strong>
+            <span>{project.progress.percent}%</span>
+          </div>
+          <span className="progress-track large">
+            <span style={{ width: `${project.progress.percent}%` }} />
+          </span>
+          <div className="gate-grid">
+            {project.progress.gates.map((gate) => (
+              <span className={`gate-pill ${gate.status}`} key={gate.key} title={gate.phase}>
+                {gate.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="detail-columns">
+        <section>
+          <div className="panel-heading compact">
+            <h3>Latest Worker Claim</h3>
+            <span className="chip muted">Claim, not proof</span>
+          </div>
+          <p className="message-box">{compactText(latestWorker, 700)}</p>
+        </section>
+        <section>
+          <div className="panel-heading compact">
+            <h3>Current Supervisor Prompt</h3>
+            <span className="chip muted">Next decision context</span>
+          </div>
+          <p className="message-box">
+            {compactText(project.currentSupervisorPrompt ?? "No supervisor prompt recorded.", 700)}
+          </p>
+        </section>
+      </div>
+
+      <section>
+        <div className="panel-heading compact">
+          <h3>Supervisor/Worker History</h3>
+          <span className="chip muted">{project.timeline.length} entries</span>
+        </div>
+        <ol className="run-history">
+          {project.timeline.map((event) => (
+            <li className={event.eventType === "supervisor_prompt_sent" ? "supervisor" : "worker"} key={event.id}>
+              <div>
+                <strong>
+                  {event.eventType === "supervisor_prompt_sent" ? "Supervisor prompt" : "Worker final response"}
+                </strong>
+                <span>
+                  Iteration {event.iteration ?? "-"} · {event.createdAt}
+                </span>
+              </div>
+              <p>{compactText(event.body ?? "No message body.", 900)}</p>
+              {event.artifactId ? <a href={`/api/artifacts/${event.artifactId}/content`}>Artifact</a> : null}
+            </li>
+          ))}
+          {project.timeline.length === 0 ? <li>No prompt/response history recorded.</li> : null}
+        </ol>
+      </section>
+
+      <div className="detail-columns">
+        <section>
+          <div className="panel-heading compact">
+            <h3>User-Required Checklist</h3>
+            <span className="chip muted">Production blockers</span>
+          </div>
+          <div className="mini-table dense">
+            {project.userRequiredItems.slice(0, 10).map((item) => (
+              <div className="mini-row" key={item.key}>
+                <span>{item.label}</span>
+                <span>{item.secret ? "secret" : item.status}</span>
+                <span>{item.canContinueWithoutIt ? "can continue" : "required"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section>
+          <div className="panel-heading compact">
+            <h3>Verification Status</h3>
+            <span className="chip muted">{project.verification.overallStatus}</span>
+          </div>
+          <div className="mini-table dense">
+            {project.verification.recent.slice(0, 8).map((check) => (
+              <div className="mini-row" key={check.id}>
+                <span>{check.checkType}</span>
+                <span>{check.status}</span>
+                <span>{check.summary ?? check.createdAt}</span>
+              </div>
+            ))}
+            {project.verification.recent.length === 0 ? (
+              <div className="mini-row">
+                <span>No verification results</span>
+                <span>unknown</span>
+                <span>Worker has not submitted proof yet</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
+
+      <div className="detail-columns">
+        <section>
+          <div className="panel-heading compact">
+            <h3>Recent Artifacts</h3>
+            <span className="chip muted">Lineage</span>
+          </div>
+          <div className="mini-table dense">
+            {project.recentArtifacts.slice(0, 8).map((artifact) => (
+              <div className="mini-row" key={artifact.id}>
+                <span>{artifact.artifactType}</span>
+                <span>{artifact.sizeBytes ? `${artifact.sizeBytes} bytes` : "unknown"}</span>
+                <a href={`/api/artifacts/${artifact.id}/content`}>{artifact.redacted ? "metadata" : "download"}</a>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section>
+          <div className="panel-heading compact">
+            <h3>Project Export</h3>
+            <button type="button" disabled={exportBusy} onClick={onExport}>
+              {exportBusy ? "Zipping" : "Create ZIP"}
+            </button>
+          </div>
+          <div className="mini-table dense">
+            {project.recentExports.slice(0, 6).map((record) => (
+              <div className="mini-row" key={record.id}>
+                <span>{record.status}</span>
+                <span>{record.fileCount ?? "-"} files</span>
+                <span>{record.errorSummary ?? record.finishedAt ?? record.requestedAt}</span>
+              </div>
+            ))}
+            {project.recentExports.length === 0 ? (
+              <div className="mini-row">
+                <span>No exports</span>
+                <span>ZIP</span>
+                <span>Use Create ZIP when needed</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -1245,6 +1534,11 @@ function versionTitle(project: ProjectSummary): string {
     `last commit: ${project.lastCommitSha ?? "none"}`,
     `last pushed: ${project.lastPushedCommitSha ?? "none"}`
   ].join("\n");
+}
+
+function compactText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}...` : normalized;
 }
 
 function renderSettingsTab(
