@@ -108,6 +108,20 @@ type CodexCompatibilityResponse = {
   createdAt: string | null;
 };
 
+type CodexHookStatusResponse = {
+  codexHomeDir: string;
+  configPath: string;
+  hooksPath: string;
+  configOwner: "app" | "user" | "missing";
+  hooksOwner: "app" | "user" | "missing";
+  conflicts: string[];
+  appVersion: string;
+  codexCliVersion: string | null;
+  workerPollIntervalSeconds: number;
+  lastStopHookAt: string | null;
+  managedHooks: string[];
+};
+
 type CodexDocsIndexResponse = {
   status: "not_started" | "indexing" | "ready" | "failed";
   indexName: string;
@@ -411,6 +425,7 @@ export function App() {
   const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
     null
   );
+  const [codexHooks, setCodexHooks] = useState<CodexHookStatusResponse | null>(null);
   const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
@@ -458,6 +473,7 @@ export function App() {
         settingsResponse,
         fail2banResponse,
         codexResponse,
+        codexHooksResponse,
         codexDocsResponse,
         toolchainResponse,
         capabilityResponse,
@@ -469,6 +485,7 @@ export function App() {
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
+        fetch("/api/codex/hooks/status", { credentials: "include" }),
         fetch("/api/codex/docs", { credentials: "include" }),
         fetch("/api/toolchain/status", { credentials: "include" }),
         fetch("/api/capabilities/status", { credentials: "include" }),
@@ -481,6 +498,7 @@ export function App() {
         !settingsResponse.ok ||
         !fail2banResponse.ok ||
         !codexResponse.ok ||
+        !codexHooksResponse.ok ||
         !codexDocsResponse.ok ||
         !toolchainResponse.ok ||
         !capabilityResponse.ok ||
@@ -495,6 +513,7 @@ export function App() {
       setSettings((await settingsResponse.json()) as PublicSettings);
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
+      setCodexHooks((await codexHooksResponse.json()) as CodexHookStatusResponse);
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
@@ -861,6 +880,7 @@ export function App() {
                 session,
                 fail2ban,
                 codexCompatibility,
+                codexHooks,
                 codexDocs,
                 toolchain,
                 capabilities,
@@ -1233,6 +1253,7 @@ function renderSettingsTab(
   session: SessionResponse | null,
   fail2ban: Fail2banResponse | null,
   codexCompatibility: CodexCompatibilityResponse | null,
+  codexHooks: CodexHookStatusResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
   capabilities: CapabilityResponse | null,
@@ -1327,6 +1348,21 @@ function renderSettingsTab(
               ["Schema artifact", codexCompatibility?.generatedSchemaPaths.jsonSchema ?? "Unavailable"],
               ["Review artifact", codexCompatibility?.artifactPath ?? "Unavailable"],
               ["Gap summary", codexCompatibility?.gapSummary ?? "Review has not run."]
+            ]}
+          />
+          <SettingsGroup
+            title="Managed Codex Hooks"
+            rows={[
+              ["Hooks owner", codexHooks?.hooksOwner ?? "missing"],
+              ["Config owner", codexHooks?.configOwner ?? "missing"],
+              ["Managed hooks", codexHooks?.managedHooks.join(", ") ?? "Unavailable"],
+              ["Worker poll fallback", `${codexHooks?.workerPollIntervalSeconds ?? "-"} seconds`],
+              ["Last Stop hook", codexHooks?.lastStopHookAt ?? "Never"],
+              [
+                "Ownership conflicts",
+                codexHooks?.conflicts.length ? codexHooks.conflicts.join("; ") : "None"
+              ],
+              ["Hooks path", codexHooks?.hooksPath ?? "Unavailable"]
             ]}
           />
           <SettingsGroup

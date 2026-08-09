@@ -6,6 +6,7 @@ import { registerCapabilityRoutes } from "./capabilities/routes.js";
 import { CapabilityService } from "./capabilities/service.js";
 import { CodexCompatibilityService } from "./codex/compatibility.js";
 import { CodexDocsIndexService } from "./codex/docs.js";
+import { CodexHookService } from "./codex/hooks.js";
 import { registerCodexRoutes } from "./codex/routes.js";
 import { registerCodexRunnerRoutes } from "./codex/runner/routes.js";
 import { CodexRunnerService } from "./codex/runner/service.js";
@@ -40,6 +41,7 @@ const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
 const codexDocsIndexService = new CodexDocsIndexService(database, config);
+const codexHookService = new CodexHookService(database, config);
 const codexRunnerService = new CodexRunnerService(database, config);
 const toolchainService = new ToolchainService(database, config);
 const capabilityService = new CapabilityService(database, config);
@@ -52,7 +54,7 @@ const server = await buildServer({
 });
 registerFail2banRoutes(server, database);
 registerSetupRoutes(server, setupService);
-registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
+registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService, codexHookService);
 registerCodexRunnerRoutes(server, codexRunnerService);
 registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
@@ -72,8 +74,15 @@ const jobRunnerTimer = setInterval(() => {
   });
 }, 60_000);
 
+const workerPollTimer = setInterval(() => {
+  void codexHookService.pollActiveWorkerState().catch((error: unknown) => {
+    server.log.error({ error }, "worker state fallback poll failed");
+  });
+}, 300_000);
+
 const shutdown = async () => {
   clearInterval(jobRunnerTimer);
+  clearInterval(workerPollTimer);
   await server.close();
   await database.close();
 };
