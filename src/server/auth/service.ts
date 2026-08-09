@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { appendFile } from "node:fs/promises";
 
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
@@ -246,5 +247,26 @@ export class AuthService {
         failureReason
       ]
     );
+
+    if (!success) {
+      await this.writeAuthFailureLog(adminId, failureReason ?? "unknown", context.ipAddress);
+    }
   }
+
+  private async writeAuthFailureLog(
+    adminId: string,
+    reason: string,
+    ipAddress: string | undefined
+  ): Promise<void> {
+    const line = `AUTH_FAIL ip=${escapeLogValue(ipAddress ?? "127.0.0.1")} admin_id=${escapeLogValue(adminId)} reason=${escapeLogValue(reason)}\n`;
+    process.stderr.write(line);
+    await appendFile(this.config.AUTH_LOG_PATH, line, {
+      encoding: "utf8",
+      mode: 0o600
+    });
+  }
+}
+
+function escapeLogValue(value: string): string {
+  return encodeURIComponent(value);
 }

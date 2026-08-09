@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
 import { ensureRuntimeDirectories, getRuntimePaths } from "./runtime/paths.js";
+import { registerFail2banRoutes } from "./security/fail2ban/routes.js";
 import { SettingsService } from "./settings/service.js";
 
 const config = loadConfig();
@@ -18,6 +19,7 @@ const server = await buildServer({
   authService,
   settingsService
 });
+registerFail2banRoutes(server, database);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

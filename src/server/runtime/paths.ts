@@ -8,6 +8,7 @@ export type RuntimePaths = {
   projectsDir: string;
   artifactsDir: string;
   runsDir: string;
+  logsDir: string;
   toolchainsDir: string;
   capabilitiesDir: string;
   secretsDir: string;
@@ -19,6 +20,7 @@ export function getRuntimePaths(config: AppConfig): RuntimePaths {
     projectsDir: config.APP_PROJECTS_DIR,
     artifactsDir: join(config.APP_DATA_DIR, "artifacts"),
     runsDir: join(config.APP_DATA_DIR, "runs"),
+    logsDir: join(config.APP_DATA_DIR, "logs"),
     toolchainsDir: join(config.APP_DATA_DIR, "toolchains"),
     capabilitiesDir: join(config.APP_DATA_DIR, "capabilities"),
     secretsDir: join(config.APP_DATA_DIR, "secrets")

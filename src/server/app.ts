@@ -22,6 +22,7 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
   const config = loadConfig();
   const readiness = dependencies.readiness ?? { migrated: false };
   const server = Fastify({
+    trustProxy: config.TRUST_PROXY,
     logger: {
       level: config.NODE_ENV === "development" ? "debug" : "info"
     }

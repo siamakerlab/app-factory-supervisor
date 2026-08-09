@@ -10,6 +10,8 @@ const envSchema = z.object({
     .default("postgres://app_factory:app_factory@localhost:5432/app_factory_supervisor"),
   APP_DATA_DIR: z.string().min(1).default("./data"),
   APP_PROJECTS_DIR: z.string().min(1).default("./projects"),
+  AUTH_LOG_PATH: z.string().min(1).default("./data/logs/auth.log"),
+  TRUST_PROXY: z.coerce.boolean().default(false),
   SESSION_COOKIE_NAME: z.string().min(1).default("afs_session"),
   SESSION_COOKIE_SECURE: z.coerce.boolean().default(false),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7)
