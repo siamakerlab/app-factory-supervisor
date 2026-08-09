@@ -620,6 +620,12 @@ export function App() {
         credentials: "include"
       });
       if (sessionResponse.status === 401) {
+        const latestSetup = await loadSetupStatus();
+        if (latestSetup && !latestSetup.adminConfigured) {
+          setSession(null);
+          setApiState("setup");
+          return;
+        }
         setApiState("auth");
         return;
       }
@@ -691,6 +697,18 @@ export function App() {
     } catch {
       setApiState("error");
     }
+  }
+
+  async function loadSetupStatus(): Promise<SetupStatus | null> {
+    const response = await fetch("/api/setup/status", {
+      credentials: "include"
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const status = (await response.json()) as SetupStatus;
+    setSetup(status);
+    return status;
   }
 
   async function loadProjectDetail(projectId: string) {
