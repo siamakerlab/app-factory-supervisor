@@ -2,12 +2,57 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildServer } from "../app.js";
 import type { JobService } from "../jobs/service.js";
+import type { SetupService } from "../setup/service.js";
 import { registerProjectRoutes } from "./routes.js";
 import type { ProjectDetail, ProjectService } from "./service.js";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 
 describe("project run routes", () => {
+  it("rejects project creation while first-run setup is incomplete", async () => {
+    const createProject = vi.fn();
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      }
+    });
+    registerProjectRoutes(
+      server,
+      {
+        createProject
+      } as Partial<ProjectService> as ProjectService,
+      {} as never,
+      undefined,
+      undefined,
+      {
+        getStatus: vi.fn().mockResolvedValue({
+          setupComplete: false
+        })
+      } as Partial<SetupService> as SetupService
+    );
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: {
+        projectName: "Demo Project",
+        appName: "Demo App",
+        packageName: "kr.example.demo",
+        userAppPlan: "Build a demo Android app for route guard testing.",
+        projectType: "new",
+        repositoryUrl: "ssh://git@example.com/demo.git",
+        globalGitUserName: "Demo User",
+        globalGitUserEmail: "demo@example.com"
+      }
+    });
+
+    expect(response.statusCode).toBe(428);
+    expect(response.json()).toEqual({
+      error: "setup_incomplete"
+    });
+    expect(createProject).not.toHaveBeenCalled();
+  });
+
   it("enqueues a supervisor turn and returns the next worker prompt when starting a run", async () => {
     const server = await buildServer({
       readiness: {
@@ -95,6 +140,43 @@ describe("project run routes", () => {
       projectId,
       job: activeJob
     });
+  });
+
+  it("rejects project run start while first-run setup is incomplete", async () => {
+    const enqueue = vi.fn();
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      }
+    });
+    registerProjectRoutes(
+      server,
+      {
+        getProjectDetail: vi.fn()
+      } as Partial<ProjectService> as ProjectService,
+      {} as never,
+      undefined,
+      {
+        getActiveProjectAutomationJob: vi.fn(),
+        enqueue
+      } as Partial<JobService> as JobService,
+      {
+        getStatus: vi.fn().mockResolvedValue({
+          setupComplete: false
+        })
+      } as Partial<SetupService> as SetupService
+    );
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/run/start`
+    });
+
+    expect(response.statusCode).toBe(428);
+    expect(response.json()).toEqual({
+      error: "setup_incomplete"
+    });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("returns the stopped project detail when stopping a run", async () => {

@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import type { GitAutomationService } from "./gitAutomation.js";
 import type { JobService } from "../jobs/service.js";
 import type { NotificationService } from "../notifications/service.js";
+import type { SetupService } from "../setup/service.js";
 import { planNextWorkerPrompt } from "../supervisor/promptPlanner.js";
 import {
   commitUnitWorkSchema,
@@ -19,13 +20,19 @@ export function registerProjectRoutes(
   projectService: ProjectService,
   gitAutomationService: GitAutomationService,
   notificationService?: NotificationService,
-  jobService?: JobService
+  jobService?: JobService,
+  setupService?: SetupService
 ): void {
   server.get("/api/projects", async () => ({
     projects: await projectService.listProjects()
   }));
 
   server.post("/api/projects", async (request, reply) => {
+    if (!(await setupComplete(setupService))) {
+      return reply.code(428).send({
+        error: "setup_incomplete"
+      });
+    }
     try {
       const body = createProjectSchema.parse(request.body);
       return reply.code(201).send(await projectService.createProject(body));
@@ -108,6 +115,11 @@ export function registerProjectRoutes(
   server.post<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/run/start",
     async (request, reply) => {
+      if (!(await setupComplete(setupService))) {
+        return reply.code(428).send({
+          error: "setup_incomplete"
+        });
+      }
       const project = await projectService.getProjectDetail(request.params.projectId);
       if (!project) {
         return reply.code(404).send({
@@ -300,4 +312,11 @@ export function registerProjectRoutes(
       }
     }
   );
+}
+
+async function setupComplete(setupService: SetupService | undefined): Promise<boolean> {
+  if (!setupService) {
+    return true;
+  }
+  return (await setupService.getStatus()).setupComplete;
 }
