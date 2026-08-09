@@ -75,6 +75,20 @@ export type ProjectDetail = ProjectSummary & {
   finalStatusSummary: string;
 };
 
+export type RunHistorySummary = {
+  id: string;
+  role: "supervisor" | "worker";
+  iteration: number;
+  status: string;
+  codexThreadId: string | null;
+  promptArtifactId: string | null;
+  jsonlArtifactId: string | null;
+  workerFinalResponseArtifactId: string | null;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 export type ProjectCompletionGate = CompletionGateResult & {
   projectId: string;
   applied: boolean;
@@ -245,6 +259,20 @@ type ProjectExportRow = {
   size_bytes: string | number | null;
   error_summary: string | null;
   requested_at: Date;
+  finished_at: Date | null;
+};
+
+type RunHistoryRow = {
+  id: string;
+  role: "supervisor" | "worker";
+  iteration: number;
+  status: string;
+  codex_thread_id: string | null;
+  prompt_artifact_id: string | null;
+  jsonl_artifact_id: string | null;
+  worker_final_response_artifact_id: string | null;
+  exit_code: number | null;
+  started_at: Date;
   finished_at: Date | null;
 };
 
@@ -585,6 +613,87 @@ export class ProjectService {
       applied: true,
       ...result
     };
+  }
+
+  async getProjectTimeline(projectId: string): Promise<TimelineEventSummary[] | null> {
+    if (!(await this.getProject(projectId))) {
+      return null;
+    }
+    return this.getTimeline(projectId);
+  }
+
+  async getProjectChecklist(projectId: string): Promise<UserRequiredItemSummary[] | null> {
+    if (!(await this.getProject(projectId))) {
+      return null;
+    }
+    return this.getUserRequiredItems(projectId);
+  }
+
+  async getRunHistory(projectId: string): Promise<RunHistorySummary[] | null> {
+    if (!(await this.getProject(projectId))) {
+      return null;
+    }
+    const result = await this.database.pool.query<RunHistoryRow>(
+      `
+        select id, role, iteration, status, codex_thread_id, prompt_artifact_id,
+          jsonl_artifact_id, worker_final_response_artifact_id, exit_code,
+          started_at, finished_at
+        from runs
+        where project_id = $1
+        order by started_at desc
+        limit 100
+      `,
+      [projectId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      role: row.role,
+      iteration: row.iteration,
+      status: row.status,
+      codexThreadId: row.codex_thread_id,
+      promptArtifactId: row.prompt_artifact_id,
+      jsonlArtifactId: row.jsonl_artifact_id,
+      workerFinalResponseArtifactId: row.worker_final_response_artifact_id,
+      exitCode: row.exit_code,
+      startedAt: row.started_at.toISOString(),
+      finishedAt: row.finished_at?.toISOString() ?? null
+    }));
+  }
+
+  async stopProjectRun(projectId: string): Promise<ProjectDetail | null> {
+    const project = await this.getProject(projectId);
+    if (!project) {
+      return null;
+    }
+    await this.database.pool.query(
+      `
+        update runs
+        set status = 'failed',
+            finished_at = coalesce(finished_at, now())
+        where project_id = $1 and status = 'running'
+      `,
+      [projectId]
+    );
+    await this.database.pool.query(
+      `
+        update jobs
+        set status = 'cancelled',
+            finished_at = coalesce(finished_at, now()),
+            error_summary = 'Project run stopped by user.'
+        where project_id = $1 and status in ('queued', 'waiting_resources', 'running')
+      `,
+      [projectId]
+    );
+    await this.database.pool.query(
+      `
+        update projects
+        set status = 'cancelled',
+            updated_at = now()
+        where id = $1
+      `,
+      [projectId]
+    );
+    return this.getProjectDetail(projectId);
   }
 
   private async getProject(id: string): Promise<ProjectSummary | null> {

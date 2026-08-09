@@ -61,7 +61,7 @@ registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService, co
 registerCodexRunnerRoutes(server, codexRunnerService);
 registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
-registerProjectRoutes(server, projectService, gitAutomationService, notificationService);
+registerProjectRoutes(server, projectService, gitAutomationService, notificationService, jobService);
 registerArtifactRoutes(server, artifactService);
 registerProjectExportRoutes(server, projectExportService);
 registerJobRoutes(server, jobService);

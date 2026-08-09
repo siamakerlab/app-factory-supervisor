@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 import type { GitAutomationService } from "./gitAutomation.js";
+import type { JobService } from "../jobs/service.js";
 import type { NotificationService } from "../notifications/service.js";
 import { planNextWorkerPrompt } from "../supervisor/promptPlanner.js";
 import {
@@ -17,7 +18,8 @@ export function registerProjectRoutes(
   server: FastifyInstance,
   projectService: ProjectService,
   gitAutomationService: GitAutomationService,
-  notificationService?: NotificationService
+  notificationService?: NotificationService,
+  jobService?: JobService
 ): void {
   server.get("/api/projects", async () => ({
     projects: await projectService.listProjects()
@@ -42,6 +44,96 @@ export function registerProjectRoutes(
     "/api/projects/:projectId",
     async (request, reply) => {
       const project = await projectService.getProjectDetail(request.params.projectId);
+      if (!project) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return project;
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/status",
+    async (request, reply) => {
+      const project = await projectService.getProjectDetail(request.params.projectId);
+      if (!project) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return project;
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/timeline",
+    async (request, reply) => {
+      const timeline = await projectService.getProjectTimeline(request.params.projectId);
+      if (!timeline) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return { timeline };
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/checklist",
+    async (request, reply) => {
+      const checklist = await projectService.getProjectChecklist(request.params.projectId);
+      if (!checklist) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return { checklist };
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/runs",
+    async (request, reply) => {
+      const runs = await projectService.getRunHistory(request.params.projectId);
+      if (!runs) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return { runs };
+    }
+  );
+
+  server.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/run/start",
+    async (request, reply) => {
+      const project = await projectService.getProjectDetail(request.params.projectId);
+      if (!project) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      const nextPrompt = planNextWorkerPrompt(project);
+      const job = jobService
+        ? await jobService.enqueue({
+            projectId: request.params.projectId,
+            jobType: "supervisor_turn",
+            priority: 10
+          })
+        : null;
+      return reply.code(201).send({
+        projectId: request.params.projectId,
+        job,
+        nextPrompt
+      });
+    }
+  );
+
+  server.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/run/stop",
+    async (request, reply) => {
+      const project = await projectService.stopProjectRun(request.params.projectId);
       if (!project) {
         return reply.code(404).send({
           error: "project_not_found"
