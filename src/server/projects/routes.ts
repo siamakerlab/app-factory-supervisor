@@ -91,6 +91,19 @@ export function registerProjectRoutes(
   );
 
   server.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/completion-gate",
+    async (request, reply) => {
+      const result = await projectService.evaluateAndApplyCompletionGate(request.params.projectId);
+      if (!result) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return result;
+    }
+  );
+
+  server.post<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/supervisor-instructions",
     async (request, reply) => {
       try {

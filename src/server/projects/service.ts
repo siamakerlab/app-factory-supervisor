@@ -7,6 +7,7 @@ import { basename, join } from "node:path";
 import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
 import { getRuntimePaths } from "../runtime/paths.js";
+import { evaluateCompletionGate, type CompletionGateResult } from "../supervisor/completionGate.js";
 import type { CreateProjectInput } from "./schema.js";
 import { updateChecklistItemSchema } from "./schema.js";
 
@@ -72,6 +73,11 @@ export type ProjectDetail = ProjectSummary & {
   recentArtifacts: ProjectArtifactSummary[];
   recentExports: ProjectExportSummary[];
   finalStatusSummary: string;
+};
+
+export type ProjectCompletionGate = CompletionGateResult & {
+  projectId: string;
+  applied: boolean;
 };
 
 export type SupervisorInstructionSummary = {
@@ -544,6 +550,39 @@ export class ProjectService {
     return this.getProjectDetail(projectId);
   }
 
+  async evaluateAndApplyCompletionGate(projectId: string): Promise<ProjectCompletionGate | null> {
+    const project = await this.getProjectDetail(projectId);
+    if (!project) {
+      return null;
+    }
+    const [runCounts, jobCounts] = await Promise.all([
+      this.getRunCounts(projectId),
+      this.getJobCounts(projectId)
+    ]);
+    const result = evaluateCompletionGate({
+      project,
+      runCounts,
+      jobCounts,
+      now: new Date()
+    });
+    const terminal = result.status !== "running";
+    await this.database.pool.query(
+      `
+        update projects
+        set status = $2,
+            completed_at = case when $3 = true then coalesce(completed_at, now()) else completed_at end,
+            updated_at = now()
+        where id = $1
+      `,
+      [projectId, result.status, terminal]
+    );
+    return {
+      projectId,
+      applied: true,
+      ...result
+    };
+  }
+
   private async getProject(id: string): Promise<ProjectSummary | null> {
     const result = await this.database.pool.query<ProjectRow>(
       `
@@ -803,6 +842,40 @@ export class ProjectService {
       requestedAt: row.requested_at.toISOString(),
       finishedAt: row.finished_at?.toISOString() ?? null
     }));
+  }
+
+  private async getRunCounts(projectId: string): Promise<{ workerTurns: number; failedRuns: number }> {
+    const result = await this.database.pool.query<{ worker_turns: string; failed_runs: string }>(
+      `
+        select
+          count(*) filter (where role = 'worker') as worker_turns,
+          count(*) filter (where status = 'failed') as failed_runs
+        from runs
+        where project_id = $1
+      `,
+      [projectId]
+    );
+    return {
+      workerTurns: Number(result.rows[0]?.worker_turns ?? 0),
+      failedRuns: Number(result.rows[0]?.failed_runs ?? 0)
+    };
+  }
+
+  private async getJobCounts(projectId: string): Promise<{ failedJobs: number; staleJobs: number }> {
+    const result = await this.database.pool.query<{ failed_jobs: string; stale_jobs: string }>(
+      `
+        select
+          count(*) filter (where status = 'failed') as failed_jobs,
+          count(*) filter (where status = 'stale') as stale_jobs
+        from jobs
+        where project_id = $1
+      `,
+      [projectId]
+    );
+    return {
+      failedJobs: Number(result.rows[0]?.failed_jobs ?? 0),
+      staleJobs: Number(result.rows[0]?.stale_jobs ?? 0)
+    };
   }
 
   private async writeGitConfig(gitHome: string, userName: string, userEmail: string): Promise<void> {

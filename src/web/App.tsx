@@ -347,6 +347,17 @@ type ProjectDetail = ProjectSummary & {
   finalStatusSummary: string;
 };
 
+type CompletionGateResponse = {
+  projectId: string;
+  status: ProjectSummary["status"];
+  productionReady: boolean;
+  evidence: string[];
+  remainingUserActions: Array<{ key: string; label: string; status: string }>;
+  blockers: string[];
+  summary: string;
+  applied: boolean;
+};
+
 type ArtifactSummary = {
   id: string;
   projectId: string | null;
@@ -524,6 +535,7 @@ export function App() {
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
+  const [completionGate, setCompletionGate] = useState<CompletionGateResponse | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -681,6 +693,20 @@ export function App() {
       return;
     }
     setProjectDetail((await response.json()) as ProjectDetail);
+  }
+
+  async function runCompletionGate(projectId: string) {
+    const response = await fetch(`/api/projects/${projectId}/completion-gate`, {
+      method: "POST",
+      credentials: "include"
+    });
+    if (!response.ok) {
+      setApiState("error");
+      return;
+    }
+    setCompletionGate((await response.json()) as CompletionGateResponse);
+    await loadApiState();
+    await loadProjectDetail(projectId);
   }
 
   async function runCodexCompatibilityReview() {
@@ -952,6 +978,8 @@ export function App() {
                 onSupervisorInstruction={(input) =>
                   void queueSupervisorInstruction(projectDetail.id, input)
                 }
+                completionGate={completionGate?.projectId === projectDetail.id ? completionGate : null}
+                onCompletionGate={() => void runCompletionGate(projectDetail.id)}
               />
             ) : (
               <p className="muted-copy">Select a project to inspect progress, timeline, and artifacts.</p>
@@ -1199,7 +1227,9 @@ function ProjectDetailPanel({
   onExport,
   checklistBusyKey,
   onChecklistUpdate,
-  onSupervisorInstruction
+  onSupervisorInstruction,
+  completionGate,
+  onCompletionGate
 }: {
   project: ProjectDetail;
   exportBusy: boolean;
@@ -1214,6 +1244,8 @@ function ProjectDetailPanel({
     priority: "low" | "normal" | "high";
     applyAfterCurrentWorkerRun: boolean;
   }) => void;
+  completionGate: CompletionGateResponse | null;
+  onCompletionGate: () => void;
 }) {
   const latestWorker = project.latestWorkerResponse ?? "No worker response yet.";
   const [instruction, setInstruction] = useState("");
@@ -1251,6 +1283,20 @@ function ProjectDetailPanel({
           ]}
         />
         <div>
+          <div className="panel-heading compact">
+            <h3>Completion Gate</h3>
+            <button type="button" onClick={onCompletionGate}>
+              Evaluate
+            </button>
+          </div>
+          <p className="message-box">
+            {completionGate
+              ? compactText(
+                  `${completionGate.status}: ${completionGate.summary} Evidence: ${completionGate.evidence.join("; ")} Blockers: ${completionGate.blockers.join("; ") || "none"}`,
+                  700
+                )
+              : "Completion gate has not been evaluated in this session."}
+          </p>
           <div className="progress-header">
             <strong>
               {project.progress.completedGates}/{project.progress.totalGates} gates
