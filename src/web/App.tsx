@@ -295,6 +295,62 @@ type ProjectExportsResponse = {
   exports: ProjectExportSummary[];
 };
 
+type JobSummary = {
+  id: string;
+  projectId: string;
+  jobType:
+    | "supervisor_turn"
+    | "worker_turn"
+    | "verification"
+    | "setup"
+    | "notification"
+    | "project_export";
+  status:
+    | "queued"
+    | "waiting_resources"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "stale";
+  resourceWaitReason: string | null;
+  heartbeatAt: string | null;
+  timeoutAt: string | null;
+  staleAfter: string | null;
+  scheduledAt: string;
+  finishedAt: string | null;
+  errorSummary: string | null;
+};
+
+type JobsStatusResponse = {
+  resourceSnapshot: {
+    status: "pass" | "wait";
+    waitReason: string | null;
+    memory: {
+      totalMb: number;
+      freeMb: number;
+      availableMb: number;
+      availablePercent: number;
+      requiredFreeMb: number;
+      requiredAvailablePercent: number;
+    };
+    disk: {
+      freeMb: number;
+      requiredFreeMb: number;
+    };
+    cpu: {
+      usagePercent: number | null;
+      maxUsagePercent: number | null;
+    };
+    load: {
+      oneMinute: number;
+      maxLoadAverage: number | null;
+    };
+    nextCheckAt: string | null;
+  };
+  jobs: JobSummary[];
+};
+
 type SettingsTab =
   | "user"
   | "email"
@@ -361,6 +417,7 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
   const [projectExports, setProjectExports] = useState<ProjectExportSummary[]>([]);
+  const [jobsStatus, setJobsStatus] = useState<JobsStatusResponse | null>(null);
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
@@ -406,7 +463,8 @@ export function App() {
         capabilityResponse,
         projectsResponse,
         artifactsResponse,
-        exportsResponse
+        exportsResponse,
+        jobsResponse
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
@@ -416,7 +474,8 @@ export function App() {
         fetch("/api/capabilities/status", { credentials: "include" }),
         fetch("/api/projects", { credentials: "include" }),
         fetch("/api/artifacts?limit=12", { credentials: "include" }),
-        fetch("/api/project-exports?limit=8", { credentials: "include" })
+        fetch("/api/project-exports?limit=8", { credentials: "include" }),
+        fetch("/api/jobs/status", { credentials: "include" })
       ]);
       if (
         !settingsResponse.ok ||
@@ -427,7 +486,8 @@ export function App() {
         !capabilityResponse.ok ||
         !projectsResponse.ok ||
         !artifactsResponse.ok ||
-        !exportsResponse.ok
+        !exportsResponse.ok ||
+        !jobsResponse.ok
       ) {
         setApiState("error");
         return;
@@ -441,6 +501,7 @@ export function App() {
       setProjects(((await projectsResponse.json()) as ProjectsResponse).projects);
       setArtifacts(((await artifactsResponse.json()) as ArtifactsResponse).artifacts);
       setProjectExports(((await exportsResponse.json()) as ProjectExportsResponse).exports);
+      setJobsStatus((await jobsResponse.json()) as JobsStatusResponse);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -538,9 +599,11 @@ export function App() {
       ["Authentication", apiState === "ready" ? "Signed in" : statusLabel(apiState)],
       ["Database", "PostgreSQL migrations enabled"],
       ["Fail2ban", "Auth failure log configured"],
-      ["Exports", "Planned"]
+      ["Exports", "ZIP enabled"],
+      ["Resources", jobsStatus?.resourceSnapshot.status ?? "Unknown"],
+      ["Job runner", `${jobsStatus?.jobs.length ?? 0} recent jobs`]
     ],
-    [apiState]
+    [apiState, jobsStatus]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
     () => createBuildRows(codexCompatibility, codexDocs, toolchain, capabilities),
@@ -739,6 +802,14 @@ export function App() {
               <CheckCircle2 size={18} />
             </div>
             <KeyValueList className="readiness-grid" rows={readiness} />
+          </div>
+
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Job Runner</h2>
+              <Activity size={18} />
+            </div>
+            <JobRunnerPanel jobsStatus={jobsStatus} />
           </div>
 
           <div className="panel wide">
@@ -1455,6 +1526,48 @@ function ProjectExportTable({ exports }: { exports: ProjectExportSummary[] }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function JobRunnerPanel({ jobsStatus }: { jobsStatus: JobsStatusResponse | null }) {
+  if (!jobsStatus) {
+    return <p className="muted-copy">Job runner status is unavailable.</p>;
+  }
+  const snapshot = jobsStatus.resourceSnapshot;
+  return (
+    <div className="settings-stack">
+      <KeyValueList
+        rows={[
+          ["Resource status", snapshot.status],
+          ["Wait reason", snapshot.waitReason ?? "None"],
+          [
+            "Memory",
+            `${snapshot.memory.availableMb} MB available (${snapshot.memory.availablePercent}%)`
+          ],
+          ["Disk", `${snapshot.disk.freeMb} MB free`],
+          ["Load", `${Math.round(snapshot.load.oneMinute * 100) / 100}`],
+          ["Next check", snapshot.nextCheckAt ?? "Not waiting"]
+        ]}
+      />
+      <div className="job-table">
+        <div className="job-row job-head">
+          <span>Type</span>
+          <span>Status</span>
+          <span>Wait</span>
+          <span>Heartbeat</span>
+          <span>Timeout</span>
+        </div>
+        {jobsStatus.jobs.slice(0, 8).map((job) => (
+          <div className="job-row" key={job.id}>
+            <span>{job.jobType}</span>
+            <span>{job.status}</span>
+            <span>{job.resourceWaitReason ?? job.errorSummary ?? "none"}</span>
+            <span>{job.heartbeatAt ?? "none"}</span>
+            <span>{job.timeoutAt ?? "none"}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

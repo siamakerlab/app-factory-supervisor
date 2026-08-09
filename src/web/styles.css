@@ -719,6 +719,40 @@ button {
   text-decoration: none;
 }
 
+.job-table {
+  display: grid;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: 0.9fr 0.8fr 1.4fr 1.2fr 1.2fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 9px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.job-row:first-child {
+  border-top: 0;
+}
+
+.job-head {
+  color: #607082;
+  background: #f5f7fa;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.job-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -768,6 +802,11 @@ button {
   }
 
   .export-row {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  .job-row {
     grid-template-columns: 1fr;
     padding: 10px;
   }

@@ -1,0 +1,493 @@
+import { randomUUID } from "node:crypto";
+import { statfs, readFile } from "node:fs/promises";
+import { loadavg, totalmem, freemem } from "node:os";
+
+import type { Database } from "../db/client.js";
+
+export type JobStatus =
+  | "queued"
+  | "waiting_resources"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale";
+
+export type JobType =
+  | "supervisor_turn"
+  | "worker_turn"
+  | "verification"
+  | "setup"
+  | "notification"
+  | "project_export";
+
+export type ResourceSnapshot = {
+  status: "pass" | "wait";
+  waitReason: string | null;
+  memory: {
+    totalMb: number;
+    freeMb: number;
+    availableMb: number;
+    availablePercent: number;
+    requiredFreeMb: number;
+    requiredAvailablePercent: number;
+  };
+  disk: {
+    freeMb: number;
+    requiredFreeMb: number;
+  };
+  cpu: {
+    usagePercent: number | null;
+    maxUsagePercent: number | null;
+  };
+  load: {
+    oneMinute: number;
+    maxLoadAverage: number | null;
+  };
+  nextCheckAt: string | null;
+};
+
+export type JobSummary = {
+  id: string;
+  projectId: string;
+  runId: string | null;
+  jobType: JobType;
+  status: JobStatus;
+  priority: number;
+  attempts: number;
+  maxAttempts: number;
+  lockedBy: string | null;
+  heartbeatAt: string | null;
+  timeoutAt: string | null;
+  staleAfter: string | null;
+  resourceWaitReason: string | null;
+  scheduledAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorSummary: string | null;
+};
+
+type JobRow = {
+  id: string;
+  project_id: string;
+  run_id: string | null;
+  job_type: JobType;
+  status: JobStatus;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  locked_by: string | null;
+  heartbeat_at: Date | null;
+  timeout_at: Date | null;
+  stale_after: Date | null;
+  resource_wait_reason: string | null;
+  scheduled_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+  error_summary: string | null;
+};
+
+type SettingsRow = {
+  min_free_memory_mb: number;
+  min_available_memory_percent: number;
+  min_free_disk_mb: number;
+  max_cpu_usage_percent: number | null;
+  max_load_average: string | null;
+  resource_recheck_interval_seconds: number;
+  stale_heartbeat_seconds: number;
+  codex_turn_timeout_seconds: number;
+  build_timeout_seconds: number;
+  test_timeout_seconds: number;
+  export_timeout_seconds: number;
+  emulator_timeout_seconds: number;
+};
+
+export class JobService {
+  private readonly runnerId = `app-${process.pid}`;
+
+  constructor(
+    private readonly database: Database,
+    private readonly projectsDir: string
+  ) {}
+
+  async enqueue(input: {
+    projectId: string;
+    jobType: JobType;
+    priority?: number;
+    maxAttempts?: number;
+  }): Promise<JobSummary> {
+    const id = randomUUID();
+    await this.database.pool.query(
+      `
+        insert into jobs (
+          id, project_id, job_type, status, priority, max_attempts, scheduled_at
+        )
+        values ($1, $2, $3, 'queued', $4, $5, now())
+      `,
+      [id, input.projectId, input.jobType, input.priority ?? 0, input.maxAttempts ?? 1]
+    );
+    return (await this.getJob(id))!;
+  }
+
+  async getStatus(): Promise<{
+    resourceSnapshot: ResourceSnapshot;
+    jobs: JobSummary[];
+  }> {
+    const [settings, jobs] = await Promise.all([this.getSettings(), this.listJobs()]);
+    return {
+      resourceSnapshot: await this.readResourceSnapshot(settings),
+      jobs
+    };
+  }
+
+  async tick(): Promise<{
+    resourceSnapshot: ResourceSnapshot;
+    handledJobs: JobSummary[];
+  }> {
+    await this.recoverStaleJobs();
+    const settings = await this.getSettings();
+    const snapshot = await this.readResourceSnapshot(settings);
+    const candidates = await this.getRunnableCandidates();
+    const handledJobs: JobSummary[] = [];
+    for (const job of candidates) {
+      if (snapshot.status === "wait") {
+        await this.recordResourceChecks(job.id, snapshot, settings);
+        await this.database.pool.query(
+          `
+            update jobs
+            set status = 'waiting_resources',
+                resource_wait_reason = $2,
+                heartbeat_at = now()
+            where id = $1 and status in ('queued', 'waiting_resources')
+          `,
+          [job.id, snapshot.waitReason]
+        );
+        handledJobs.push((await this.getJob(job.id))!);
+        continue;
+      }
+      const locked = await this.acquireProjectLock(job.projectId, job.id, settings.stale_heartbeat_seconds);
+      if (!locked) {
+        continue;
+      }
+      await this.startAndCompletePlaceholderJob(job, settings);
+      await this.releaseProjectLock(job.projectId, job.id);
+      handledJobs.push((await this.getJob(job.id))!);
+    }
+    return {
+      resourceSnapshot: snapshot,
+      handledJobs
+    };
+  }
+
+  async recoverStaleJobs(): Promise<number> {
+    const result = await this.database.pool.query(
+      `
+        update jobs
+        set status = 'stale',
+            finished_at = now(),
+            error_summary = 'Job heartbeat became stale or timeout deadline passed.'
+        where status = 'running'
+          and (
+            (stale_after is not null and stale_after < now())
+            or (timeout_at is not null and timeout_at < now())
+          )
+      `
+    );
+    await this.database.pool.query("delete from project_locks where expires_at is not null and expires_at < now()");
+    return result.rowCount ?? 0;
+  }
+
+  private async startAndCompletePlaceholderJob(job: JobSummary, settings: SettingsRow): Promise<void> {
+    const now = Date.now();
+    await this.database.pool.query(
+      `
+        update jobs
+        set status = 'running',
+            attempts = attempts + 1,
+            locked_by = $2,
+            locked_at = now(),
+            heartbeat_at = now(),
+            timeout_at = $3,
+            stale_after = $4,
+            started_at = coalesce(started_at, now()),
+            resource_wait_reason = null
+        where id = $1
+      `,
+      [
+        job.id,
+        this.runnerId,
+        new Date(now + timeoutSeconds(job.jobType, settings) * 1000),
+        new Date(now + settings.stale_heartbeat_seconds * 1000)
+      ]
+    );
+    await this.database.pool.query(
+      `
+        insert into process_heartbeats (
+          id, job_id, process_kind, pid, host_id, status, last_seen_at, metadata
+        )
+        values ($1, $2, $3, $4, $5, 'completed', now(), $6)
+      `,
+      [
+        randomUUID(),
+        job.id,
+        job.jobType,
+        process.pid,
+        this.runnerId,
+        JSON.stringify({ placeholderRunner: true })
+      ]
+    );
+    await this.database.pool.query(
+      `
+        update jobs
+        set status = 'succeeded',
+            heartbeat_at = now(),
+            finished_at = now()
+        where id = $1
+      `,
+      [job.id]
+    );
+  }
+
+  private async getRunnableCandidates(): Promise<JobSummary[]> {
+    const result = await this.database.pool.query<JobRow>(
+      `
+        select *
+        from jobs
+        where status in ('queued', 'waiting_resources')
+          and scheduled_at <= now()
+        order by priority desc, scheduled_at asc
+        limit 10
+      `
+    );
+    return result.rows.map(mapJobRow);
+  }
+
+  private async listJobs(): Promise<JobSummary[]> {
+    const result = await this.database.pool.query<JobRow>(
+      `
+        select *
+        from jobs
+        order by scheduled_at desc
+        limit 50
+      `
+    );
+    return result.rows.map(mapJobRow);
+  }
+
+  private async getJob(id: string): Promise<JobSummary | null> {
+    const result = await this.database.pool.query<JobRow>("select * from jobs where id = $1", [id]);
+    return result.rows[0] ? mapJobRow(result.rows[0]) : null;
+  }
+
+  private async acquireProjectLock(
+    projectId: string,
+    jobId: string,
+    staleHeartbeatSeconds: number
+  ): Promise<boolean> {
+    const result = await this.database.pool.query(
+      `
+        insert into project_locks (project_id, lock_owner, lock_reason, locked_at, expires_at)
+        values ($1, $2, $3, now(), $4)
+        on conflict (project_id) do nothing
+      `,
+      [
+        projectId,
+        this.runnerId,
+        `job:${jobId}`,
+        new Date(Date.now() + staleHeartbeatSeconds * 1000)
+      ]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  private async releaseProjectLock(projectId: string, jobId: string): Promise<void> {
+    await this.database.pool.query(
+      "delete from project_locks where project_id = $1 and lock_reason = $2",
+      [projectId, `job:${jobId}`]
+    );
+  }
+
+  private async getSettings(): Promise<SettingsRow> {
+    const result = await this.database.pool.query<SettingsRow>(
+      `
+        select min_free_memory_mb, min_available_memory_percent, min_free_disk_mb,
+          max_cpu_usage_percent, max_load_average, resource_recheck_interval_seconds,
+          stale_heartbeat_seconds, codex_turn_timeout_seconds, build_timeout_seconds,
+          test_timeout_seconds, export_timeout_seconds, emulator_timeout_seconds
+        from app_settings
+        where id = true
+      `
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error("app_settings singleton row is missing");
+    }
+    return row;
+  }
+
+  private async readResourceSnapshot(settings: SettingsRow): Promise<ResourceSnapshot> {
+    const memory = await readMemoryMb();
+    const disk = await readDiskFreeMb(this.projectsDir);
+    const oneMinuteLoad = loadavg()[0] ?? 0;
+    const cpuUsagePercent = null;
+    const waits: string[] = [];
+    const availablePercent = Math.floor((memory.availableMb / Math.max(memory.totalMb, 1)) * 100);
+    if (memory.freeMb < settings.min_free_memory_mb) {
+      waits.push(`free memory ${memory.freeMb}MB below ${settings.min_free_memory_mb}MB`);
+    }
+    if (availablePercent < settings.min_available_memory_percent) {
+      waits.push(`available memory ${availablePercent}% below ${settings.min_available_memory_percent}%`);
+    }
+    if (disk.freeMb < settings.min_free_disk_mb) {
+      waits.push(`free disk ${disk.freeMb}MB below ${settings.min_free_disk_mb}MB`);
+    }
+    if (settings.max_load_average !== null && oneMinuteLoad > Number(settings.max_load_average)) {
+      waits.push(`load average ${oneMinuteLoad.toFixed(2)} above ${settings.max_load_average}`);
+    }
+    return {
+      status: waits.length > 0 ? "wait" : "pass",
+      waitReason: waits.length > 0 ? waits.join("; ") : null,
+      memory: {
+        totalMb: memory.totalMb,
+        freeMb: memory.freeMb,
+        availableMb: memory.availableMb,
+        availablePercent,
+        requiredFreeMb: settings.min_free_memory_mb,
+        requiredAvailablePercent: settings.min_available_memory_percent
+      },
+      disk: {
+        freeMb: disk.freeMb,
+        requiredFreeMb: settings.min_free_disk_mb
+      },
+      cpu: {
+        usagePercent: cpuUsagePercent,
+        maxUsagePercent: settings.max_cpu_usage_percent
+      },
+      load: {
+        oneMinute: oneMinuteLoad,
+        maxLoadAverage: settings.max_load_average === null ? null : Number(settings.max_load_average)
+      },
+      nextCheckAt:
+        waits.length > 0
+          ? new Date(Date.now() + settings.resource_recheck_interval_seconds * 1000).toISOString()
+          : null
+    };
+  }
+
+  private async recordResourceChecks(
+    jobId: string,
+    snapshot: ResourceSnapshot,
+    settings: SettingsRow
+  ): Promise<void> {
+    const nextCheckAt = snapshot.nextCheckAt ? new Date(snapshot.nextCheckAt) : null;
+    await this.database.pool.query(
+      `
+        insert into resource_checks (
+          id, job_id, check_type, status, available_memory_mb, free_memory_mb,
+          total_memory_mb, required_free_memory_mb, required_available_memory_percent,
+          checked_at, next_check_at, metadata
+        )
+        values ($1, $2, 'memory', $3, $4, $5, $6, $7, $8, now(), $9, $10)
+      `,
+      [
+        randomUUID(),
+        jobId,
+        snapshot.status,
+        snapshot.memory.availableMb,
+        snapshot.memory.freeMb,
+        snapshot.memory.totalMb,
+        snapshot.memory.requiredFreeMb,
+        snapshot.memory.requiredAvailablePercent,
+        nextCheckAt,
+        JSON.stringify({ waitReason: snapshot.waitReason })
+      ]
+    );
+    await this.database.pool.query(
+      `
+        insert into resource_checks (
+          id, job_id, check_type, status, free_disk_mb, required_free_disk_mb,
+          load_average, max_load_average, checked_at, next_check_at, metadata
+        )
+        values ($1, $2, 'disk', $3, $4, $5, $6, $7, now(), $8, $9)
+      `,
+      [
+        randomUUID(),
+        jobId,
+        snapshot.status,
+        snapshot.disk.freeMb,
+        snapshot.disk.requiredFreeMb,
+        snapshot.load.oneMinute,
+        settings.max_load_average,
+        nextCheckAt,
+        JSON.stringify({ waitReason: snapshot.waitReason })
+      ]
+    );
+  }
+}
+
+function timeoutSeconds(jobType: JobType, settings: SettingsRow): number {
+  if (jobType === "project_export") {
+    return settings.export_timeout_seconds;
+  }
+  if (jobType === "verification") {
+    return settings.test_timeout_seconds;
+  }
+  if (jobType === "worker_turn" || jobType === "supervisor_turn") {
+    return settings.codex_turn_timeout_seconds;
+  }
+  return settings.build_timeout_seconds;
+}
+
+async function readMemoryMb() {
+  try {
+    const text = await readFile("/proc/meminfo", "utf8");
+    const total = matchMeminfo(text, "MemTotal") ?? Math.floor(totalmem() / 1024 / 1024);
+    const free = matchMeminfo(text, "MemFree") ?? Math.floor(freemem() / 1024 / 1024);
+    const available = matchMeminfo(text, "MemAvailable") ?? free;
+    return {
+      totalMb: total,
+      freeMb: free,
+      availableMb: available
+    };
+  } catch {
+    return {
+      totalMb: Math.floor(totalmem() / 1024 / 1024),
+      freeMb: Math.floor(freemem() / 1024 / 1024),
+      availableMb: Math.floor(freemem() / 1024 / 1024)
+    };
+  }
+}
+
+function matchMeminfo(text: string, key: string): number | null {
+  const match = text.match(new RegExp(`^${key}:\\s+(\\d+)\\s+kB`, "m"));
+  return match ? Math.floor(Number(match[1]) / 1024) : null;
+}
+
+async function readDiskFreeMb(path: string): Promise<{ freeMb: number }> {
+  const stats = await statfs(path);
+  return {
+    freeMb: Math.floor((stats.bavail * stats.bsize) / 1024 / 1024)
+  };
+}
+
+function mapJobRow(row: JobRow): JobSummary {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    runId: row.run_id,
+    jobType: row.job_type,
+    status: row.status,
+    priority: row.priority,
+    attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+    lockedBy: row.locked_by,
+    heartbeatAt: row.heartbeat_at?.toISOString() ?? null,
+    timeoutAt: row.timeout_at?.toISOString() ?? null,
+    staleAfter: row.stale_after?.toISOString() ?? null,
+    resourceWaitReason: row.resource_wait_reason,
+    scheduledAt: row.scheduled_at.toISOString(),
+    startedAt: row.started_at?.toISOString() ?? null,
+    finishedAt: row.finished_at?.toISOString() ?? null,
+    errorSummary: row.error_summary
+  };
+}
