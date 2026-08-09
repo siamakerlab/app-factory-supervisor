@@ -14,6 +14,7 @@ describe("planNextWorkerPrompt", () => {
     expect(prompt.prompt).toBe("A");
     expect(prompt.source).toBe("worker_option");
     expect(prompt.wordCount).toBe(1);
+    expect(prompt.lifecycleArea).toBeNull();
   });
 
   it("keeps generated worker prompts under 300 words", () => {
@@ -36,6 +37,15 @@ describe("planNextWorkerPrompt", () => {
 
     expect(prompt.wordCount).toBeLessThanOrEqual(300);
     expect(prompt.usesQueuedInstructionId).toBe("instruction-1");
+  });
+
+  it("uses lifecycle templates for pending progress gates", () => {
+    const prompt = planNextWorkerPrompt(project({}));
+
+    expect(prompt.source).toBe("progress_gate");
+    expect(prompt.lifecycleArea).toBe("implementation");
+    expect(prompt.taskType).toBe("implementation");
+    expect(prompt.verificationTier).toBe("T2");
   });
 });
 

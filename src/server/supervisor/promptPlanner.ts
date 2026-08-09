@@ -1,4 +1,9 @@
 import type { ProjectDetail } from "../projects/service.js";
+import {
+  buildLifecyclePrompt,
+  type LifecyclePromptArea,
+  type LifecyclePromptTemplate
+} from "./lifecyclePrompts.js";
 
 export type SupervisorNextPrompt = {
   projectId: string;
@@ -6,12 +11,15 @@ export type SupervisorNextPrompt = {
   wordCount: number;
   source: "worker_option" | "user_instruction" | "blocked_checklist" | "progress_gate" | "final_summary";
   usesQueuedInstructionId: string | null;
+  lifecycleArea: LifecyclePromptArea | null;
+  taskType: LifecyclePromptTemplate["taskType"] | null;
+  verificationTier: LifecyclePromptTemplate["verificationTier"] | null;
 };
 
 export function planNextWorkerPrompt(project: ProjectDetail): SupervisorNextPrompt {
   const option = chooseWorkerOption(project.latestWorkerResponse);
   if (option) {
-    return result(project.id, option, "worker_option", null);
+    return result(project.id, option, "worker_option", null, null);
   }
 
   const queuedInstruction = project.supervisorInstructions.find((item) => item.status === "queued");
@@ -25,7 +33,8 @@ export function planNextWorkerPrompt(project: ProjectDetail): SupervisorNextProm
         "Acceptance: report changed files, verification run, blockers, and next A-G options."
       ].join(" "),
       "user_instruction",
-      queuedInstruction.id
+      queuedInstruction.id,
+      null
     );
   }
 
@@ -45,36 +54,34 @@ export function planNextWorkerPrompt(project: ProjectDetail): SupervisorNextProm
         "Acceptance: list exact user actions and next A-G options."
       ].join(" "),
       "blocked_checklist",
-      null
+      null,
+      {
+        area: "final_readiness",
+        taskType: "release_readiness_summary",
+        verificationTier: "T0"
+      }
     );
   }
 
   const nextGate = project.progress.gates.find((gate) => gate.status === "pending");
   if (nextGate) {
+    const lifecyclePrompt = buildLifecyclePrompt({ project, gate: nextGate });
     return result(
       project.id,
-      [
-        `Advance the roadmap gate: ${nextGate.label}.`,
-        `Phase: ${nextGate.phase}.`,
-        "Perform the needed worker task yourself, including any code review, planning, research, or verification appropriate for this gate.",
-        "Do not run emulator/device verification unless this gate explicitly requires the QA/emulator phase.",
-        "Acceptance: provide evidence, changed files or artifacts, verification tier, blockers, and next A-G options."
-      ].join(" "),
+      lifecyclePrompt.prompt,
       "progress_gate",
-      null
+      null,
+      lifecyclePrompt
     );
   }
 
+  const lifecyclePrompt = buildLifecyclePrompt({ project });
   return result(
     project.id,
-    [
-      "Prepare final production-readiness summary.",
-      "Verify all roadmap gates, checklist items, artifacts, and verification evidence from backend state.",
-      "Do not inspect source directly unless you are the worker performing the verification task.",
-      "Acceptance: state whether production-level implementation is ready and list only user-owned remaining actions."
-    ].join(" "),
+    lifecyclePrompt.prompt,
     "final_summary",
-    null
+    null,
+    lifecyclePrompt
   );
 }
 
@@ -91,7 +98,12 @@ function result(
   projectId: string,
   prompt: string,
   source: SupervisorNextPrompt["source"],
-  usesQueuedInstructionId: string | null
+  usesQueuedInstructionId: string | null,
+  lifecycle: {
+    area: LifecyclePromptArea;
+    taskType: LifecyclePromptTemplate["taskType"];
+    verificationTier: LifecyclePromptTemplate["verificationTier"];
+  } | null
 ): SupervisorNextPrompt {
   const cappedPrompt = capWords(prompt, 300);
   return {
@@ -99,7 +111,10 @@ function result(
     prompt: cappedPrompt,
     wordCount: wordCount(cappedPrompt),
     source,
-    usesQueuedInstructionId
+    usesQueuedInstructionId,
+    lifecycleArea: lifecycle?.area ?? null,
+    taskType: lifecycle?.taskType ?? null,
+    verificationTier: lifecycle?.verificationTier ?? null
   };
 }
 
