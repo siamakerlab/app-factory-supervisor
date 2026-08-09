@@ -30,6 +30,9 @@ export type ProjectSummary = {
   maxExecutionHours: number;
   maxWorkerTurns: number;
   remoteReachable: boolean;
+  currentVersion: string | null;
+  lastCommitSha: string | null;
+  lastPushedCommitSha: string | null;
   latestWorkerResponse: string | null;
   createdAt: string;
   updatedAt: string;
@@ -61,6 +64,9 @@ type ProjectRow = {
   max_execution_hours: number;
   max_worker_turns: number;
   latest_worker_response: string | null;
+  current_version: string | null;
+  last_commit_sha: string | null;
+  last_pushed_commit_sha: string | null;
   created_at: Date;
   updated_at: Date;
   remote_reachable: boolean | null;
@@ -128,7 +134,7 @@ export class ProjectService {
   async listProjects(): Promise<ProjectSummary[]> {
     const result = await this.database.pool.query<ProjectRow>(
       `
-        select p.*, g.remote_reachable,
+        select p.*, g.remote_reachable, v.current_version, v.last_commit_sha, v.last_pushed_commit_sha,
           (
             select body
             from timeline_events t
@@ -138,6 +144,7 @@ export class ProjectService {
           ) as latest_worker_response
         from projects p
         left join project_git_settings g on g.project_id = p.id
+        left join project_version_state v on v.project_id = p.id
         order by p.created_at desc
       `
     );
@@ -238,9 +245,11 @@ export class ProjectService {
   private async getProject(id: string): Promise<ProjectSummary | null> {
     const result = await this.database.pool.query<ProjectRow>(
       `
-        select p.*, g.remote_reachable, null::text as latest_worker_response
+        select p.*, g.remote_reachable, v.current_version, v.last_commit_sha, v.last_pushed_commit_sha,
+          null::text as latest_worker_response
         from projects p
         left join project_git_settings g on g.project_id = p.id
+        left join project_version_state v on v.project_id = p.id
         where p.id = $1
       `,
       [id]
@@ -505,6 +514,9 @@ function mapProjectRow(row: ProjectRow): ProjectSummary {
     maxExecutionHours: row.max_execution_hours,
     maxWorkerTurns: row.max_worker_turns,
     remoteReachable: row.remote_reachable ?? false,
+    currentVersion: row.current_version,
+    lastCommitSha: row.last_commit_sha,
+    lastPushedCommitSha: row.last_pushed_commit_sha,
     latestWorkerResponse: row.latest_worker_response,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString()

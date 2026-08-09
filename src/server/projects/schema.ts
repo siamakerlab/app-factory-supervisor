@@ -19,3 +19,15 @@ export const createProjectSchema = z.object({
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+export const commitUnitWorkSchema = z.object({
+  unitType: z.string().trim().min(2).max(80),
+  scope: z.string().trim().min(2).max(160),
+  verificationTier: z.enum(["T0", "T1", "T2", "T3", "T4"]).optional(),
+  summary: z.string().trim().max(1000).optional()
+});
+
+export const pushPhaseSchema = z.object({
+  phase: z.string().trim().min(2).max(120),
+  summary: z.string().trim().max(1000).optional()
+});

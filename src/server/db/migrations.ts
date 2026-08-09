@@ -528,6 +528,31 @@ create table if not exists capability_install_runs (
 create index if not exists idx_capability_install_runs_started
   on capability_install_runs(started_at desc);
 `
+  },
+  {
+    id: "0007_project_git_automation_events",
+    description: "Track project versioning, unit commits, and phase pushes",
+    sql: `
+create table if not exists project_git_automation_events (
+  id uuid primary key,
+  project_id uuid not null references projects(id) on delete cascade,
+  event_type text not null check (event_type in ('unit_commit', 'phase_push', 'push_failed', 'commit_skipped')),
+  unit_type text,
+  scope text,
+  phase text,
+  version text not null,
+  verification_tier text,
+  commit_sha text,
+  pushed_commit_sha text,
+  status text not null check (status in ('succeeded', 'failed', 'skipped')),
+  summary text not null,
+  command_output text,
+  created_at timestamptz not null
+);
+
+create index if not exists idx_project_git_automation_events_project_created
+  on project_git_automation_events(project_id, created_at desc);
+`
   }
 ];
 
@@ -540,6 +565,7 @@ export const expectedMvpTables = [
   "projects",
   "project_git_settings",
   "project_version_state",
+  "project_git_automation_events",
   "toolchain_snapshots",
   "project_toolchain_snapshots",
   "toolchain_install_runs",
@@ -580,5 +606,6 @@ export const expectedMvpIndexes = [
   "idx_progress_gates_project_status",
   "idx_codex_compatibility_reviews_created",
   "idx_toolchain_install_runs_started",
-  "idx_capability_install_runs_started"
+  "idx_capability_install_runs_started",
+  "idx_project_git_automation_events_project_created"
 ] as const;

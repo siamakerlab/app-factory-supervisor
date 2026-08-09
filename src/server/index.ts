@@ -8,6 +8,7 @@ import { registerCodexRoutes } from "./codex/routes.js";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
+import { GitAutomationService } from "./projects/gitAutomation.js";
 import { registerProjectRoutes } from "./projects/routes.js";
 import { ProjectService } from "./projects/service.js";
 import { ensureRuntimeDirectories, getRuntimePaths } from "./runtime/paths.js";
@@ -31,6 +32,7 @@ const codexDocsIndexService = new CodexDocsIndexService(database, config);
 const toolchainService = new ToolchainService(database, config);
 const capabilityService = new CapabilityService(database, config);
 const projectService = new ProjectService(database, config);
+const gitAutomationService = new GitAutomationService(database, config);
 const server = await buildServer({
   readiness,
   authService,
@@ -41,7 +43,7 @@ registerSetupRoutes(server, setupService);
 registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
 registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
-registerProjectRoutes(server, projectService);
+registerProjectRoutes(server, projectService, gitAutomationService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

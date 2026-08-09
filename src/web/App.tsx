@@ -240,6 +240,9 @@ type ProjectSummary = {
   maxExecutionHours: number;
   maxWorkerTurns: number;
   remoteReachable: boolean;
+  currentVersion: string | null;
+  lastCommitSha: string | null;
+  lastPushedCommitSha: string | null;
   latestWorkerResponse: string | null;
   createdAt: string;
   updatedAt: string;
@@ -561,6 +564,7 @@ export function App() {
                 <span>Project</span>
                 <span>Phase</span>
                 <span>Progress</span>
+                <span>Version</span>
                 <span>Status</span>
               </div>
               {projects.length === 0 ? (
@@ -572,6 +576,7 @@ export function App() {
                       <span style={{ width: "0%" }} />
                     </span>
                   </span>
+                  <span>None</span>
                   <span className="chip muted">Setup required</span>
                 </div>
               ) : null}
@@ -584,6 +589,7 @@ export function App() {
                       <span style={{ width: `${projectProgress(project)}%` }} />
                     </span>
                   </span>
+                  <span title={versionTitle(project)}>{project.currentVersion ?? "No version"}</span>
                   <span className={project.status === "running" ? "chip" : "chip muted"}>
                     {project.status}
                   </span>
@@ -1041,6 +1047,14 @@ function projectProgress(project: ProjectSummary): number {
     "production ready": 100
   };
   return phaseWeights[project.currentPhase] ?? 0;
+}
+
+function versionTitle(project: ProjectSummary): string {
+  return [
+    `version: ${project.currentVersion ?? "none"}`,
+    `last commit: ${project.lastCommitSha ?? "none"}`,
+    `last pushed: ${project.lastPushedCommitSha ?? "none"}`
+  ].join("\n");
 }
 
 function renderSettingsTab(
