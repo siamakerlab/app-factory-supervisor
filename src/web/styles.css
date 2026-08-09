@@ -161,9 +161,39 @@ button {
   grid-column: span 1;
 }
 
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: #eef2f6;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #15202b;
+}
+
+.auth-brand div {
+  display: grid;
+  gap: 1px;
+}
+
+.auth-brand strong {
+  font-size: 16px;
+}
+
+.auth-brand span {
+  color: #5f6e7d;
+  font-size: 13px;
+}
+
 .login-panel {
+  width: min(420px, calc(100vw - 48px));
   max-width: 420px;
-  margin-bottom: 14px;
 }
 
 .panel-heading {

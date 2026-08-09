@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   Bell,
@@ -1065,6 +1065,49 @@ export function App() {
     [codexCompatibility, codexAuth, codexHooks, codexDocs, toolchain, capabilities]
   );
 
+  if (apiState === "auth") {
+    return (
+      <AuthScreen>
+        <LoginPanel
+          onLoggedIn={() => {
+            void loadApiState();
+          }}
+        />
+      </AuthScreen>
+    );
+  }
+
+  if (apiState === "loading") {
+    return (
+      <AuthScreen>
+        <section className="panel login-panel">
+          <div className="panel-heading">
+            <h2>Loading</h2>
+            <ShieldAlert size={18} />
+          </div>
+          <p className="muted-copy">Checking session.</p>
+        </section>
+      </AuthScreen>
+    );
+  }
+
+  if (apiState === "error") {
+    return (
+      <AuthScreen>
+        <section className="panel login-panel">
+          <div className="panel-heading">
+            <h2>Connection Error</h2>
+            <ShieldAlert size={18} />
+          </div>
+          <p className="muted-copy">The server could not verify the current session.</p>
+          <button type="button" onClick={() => void loadApiState()}>
+            Retry
+          </button>
+        </section>
+      </AuthScreen>
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1130,14 +1173,6 @@ export function App() {
             installBusy={toolchainBusy || capabilityBusy || codexDocsBusy}
             onInstallEnvironment={() => void runFirstRunEnvironmentInstall()}
             onReload={() => {
-              void loadApiState();
-            }}
-          />
-        ) : null}
-
-        {apiState === "auth" ? (
-          <LoginPanel
-            onLoggedIn={() => {
               void loadApiState();
             }}
           />
@@ -1524,6 +1559,21 @@ function StepHeader({
       <strong>{title}</strong>
       <em>{status}</em>
     </div>
+  );
+}
+
+function AuthScreen({ children }: { children: ReactNode }) {
+  return (
+    <main className="auth-screen">
+      <div className="auth-brand">
+        <Box size={22} />
+        <div>
+          <strong>App Factory</strong>
+          <span>Supervisor</span>
+        </div>
+      </div>
+      {children}
+    </main>
   );
 }
 
