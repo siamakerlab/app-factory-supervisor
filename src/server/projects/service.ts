@@ -357,6 +357,9 @@ export class ProjectService {
         ? await this.cloneExisting(input.repositoryUrl, projectDir, gitHome)
         : await this.initializeNewRepository(input.repositoryUrl, projectDir, gitHome);
     await ensureProjectSensitiveGitignore(projectDir);
+    if (input.projectType === "new") {
+      await writeFile(join(projectDir, "AGENTS.md"), buildAgentsMd(input), "utf8");
+    }
     const status: ProjectStatus = gitStatus.remoteReachable ? "running" : "blocked_needs_user";
     const firstSupervisorPrompt = initialSupervisorPrompt(input);
     const keystore =
@@ -1175,17 +1178,80 @@ function finalStatusSummary(
   return `Project is in ${project.currentPhase}; ${progressPercent}% of progress gates are complete.`;
 }
 
+export function buildAgentsMd(input: Pick<CreateProjectInput, "appName" | "packageName">): string {
+  return [
+    "# AGENTS.md",
+    "",
+    "## Scope",
+    "",
+    `This project is Android/Kotlin only. App name: ${input.appName}. Package: ${input.packageName}.`,
+    "",
+    "## Worker Boundaries",
+    "",
+    "- The worker implements, reviews, researches, verifies, and reports evidence.",
+    "- The supervisor only selects the next short prompt and never edits source directly.",
+    "- Stop after the scoped task and wait for the next supervisor prompt.",
+    "",
+    "## Build And Verification",
+    "",
+    "- Prefer the repository's Gradle wrapper when present: `./gradlew build`.",
+    "- Use targeted tests for small changes and broader tests for shared behavior.",
+    "- Do not run emulator/device verification except in the QA/emulator phase or when explicitly requested.",
+    "- Report verification tier: T0 metadata, T1 static, T2 module build/test, T3 full non-emulator, T4 emulator/release.",
+    "",
+    "## Architecture Rules",
+    "",
+    "- Follow existing Kotlin, Compose, Material 3, and module patterns.",
+    "- Keep changes scoped to the current roadmap item.",
+    "- Preserve phone, foldable, tablet, landscape, and large-screen behavior.",
+    "- Avoid mock-only critical paths in production-ready code.",
+    "",
+    "## Secrets And Signing",
+    "",
+    "- Never put secrets in prompts, JSONL logs, screenshots, emails, commit messages, or source files.",
+    "- Keep `keystores/`, `*.jks`, `*.keystore`, `*.p12`, `*.pem`, and `signing.properties` ignored by Git.",
+    "- Store passwords and external API credentials through ignored files or app secret storage only.",
+    "- Confirm `.gitignore` protects signing and secret material before every commit.",
+    "",
+    "## Done Criteria",
+    "",
+    "- Summarize completed work concisely.",
+    "- List changed files.",
+    "- Include verification results and tier.",
+    "- List blockers and user-owned external actions.",
+    "- Offer next actions as A-G options when useful.",
+    "",
+    "## Commit And Versioning",
+    "",
+    "- Commit each completed unit of work with an English commit message.",
+    "- Use project versioning policy: semantic version plus `yymmddrrr` suffix.",
+    "- Push after larger phase-level work when configured.",
+    ""
+  ].join("\n");
+}
+
+export function agentsGuidanceWorkerPrompt(input: Pick<CreateProjectInput, "appName" | "packageName">): string {
+  return [
+    `Create or update AGENTS.md for ${input.appName}.`,
+    `Scope is Android/Kotlin only. Package: ${input.packageName}.`,
+    "Include build/test commands, architecture rules, supervisor/worker boundaries, no-secret rules, keystores ignore requirement, done criteria, verification commands, and commit/versioning rules.",
+    "Do not include secrets. Acceptance: AGENTS.md exists or is updated, and .gitignore protects keystores/signing files."
+  ].join(" ");
+}
+
 function initialSupervisorPrompt(input: CreateProjectInput): string {
   if (input.projectType === "existing") {
     return [
       "Inspect this existing Android/Kotlin project.",
       "Check planning docs, implementation status, build readiness, verification evidence, and roadmap usability.",
+      agentsGuidanceWorkerPrompt(input),
       "Report what exists, what is missing, and the next best scoped task. Do not restart from scratch unless required.",
       `App: ${input.appName}. Package: ${input.packageName}. User plan: ${input.userAppPlan}`
     ].join(" ");
   }
   return [
     "Create initial mvp.md and roadmap.md for this Android/Kotlin app.",
+    "Use the existing AGENTS.md as worker guidance.",
     "Use Play Store and community market research later, but first draft a coherent MVP direction from the user's plan.",
     "Keep deferred items explicit and prepare for phone, foldable, and tablet UX planning.",
     `App: ${input.appName}. Package: ${input.packageName}. User plan: ${input.userAppPlan}`
