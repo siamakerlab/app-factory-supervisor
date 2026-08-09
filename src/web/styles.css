@@ -736,6 +736,18 @@ button {
   font: inherit;
 }
 
+.settings-form .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-form .checkbox-label input {
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+}
+
 .project-wizard {
   display: grid;
   gap: 12px;

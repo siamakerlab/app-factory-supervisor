@@ -1343,6 +1343,7 @@ export function App() {
                 buildEnvironmentRows,
                 apiState,
                 testEmailResult,
+                (nextSettings) => setSettings(nextSettings),
                 () => void sendTestEmail()
               )}
             </div>
@@ -2097,6 +2098,7 @@ function renderSettingsTab(
   buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error",
   testEmailResult: string | null,
+  onSettingsSaved: (settings: PublicSettings) => void,
   onTestEmail: () => void
 ) {
   if (apiState !== "ready") {
@@ -2133,6 +2135,7 @@ function renderSettingsTab(
           <button type="button" onClick={onTestEmail} disabled={!settings?.smtpConfigured}>
             Send Test Email
           </button>
+          <SmtpSettingsForm onSaved={onSettingsSaved} />
         </div>
       );
     case "build":
@@ -2237,50 +2240,56 @@ function renderSettingsTab(
       return <SettingsGroup title="Credentials And Secrets" rows={secretRows} />;
     case "defaults":
       return (
-        <SettingsGroup
-          title="Default Project Limits"
-          rows={[
-            ["Max execution hours", `${settings?.defaultMaxExecutionHours ?? "-"} hours`],
-            ["Max worker turns", `${settings?.defaultMaxWorkerTurns ?? "-"} turns`],
-            ["Retry limits", `${settings?.defaultRetryLimit ?? "-"} attempts`],
-            ["Default memory threshold", `${settings?.minFreeMemoryMb ?? "-"} MB`]
-          ]}
-        />
+        <div className="settings-stack">
+          <SettingsGroup
+            title="Default Project Limits"
+            rows={[
+              ["Max execution hours", `${settings?.defaultMaxExecutionHours ?? "-"} hours`],
+              ["Max worker turns", `${settings?.defaultMaxWorkerTurns ?? "-"} turns`],
+              ["Retry limits", `${settings?.defaultRetryLimit ?? "-"} attempts`],
+              ["Default memory threshold", `${settings?.minFreeMemoryMb ?? "-"} MB`]
+            ]}
+          />
+          <DefaultLimitsForm settings={settings} onSaved={onSettingsSaved} />
+        </div>
       );
     case "resources":
       return (
-        <SettingsGroup
-          title="Resource Limits"
-          rows={[
-            ["CPU limit", settings?.maxCpuUsagePercent ? `${settings.maxCpuUsagePercent}%` : "Unset"],
-            ["Resource status", jobsStatus?.resourceSnapshot.status ?? "Unavailable"],
-            ["Resource wait reason", jobsStatus?.resourceSnapshot.waitReason ?? "None"],
-            [
-              "Current memory",
-              jobsStatus
-                ? `${jobsStatus.resourceSnapshot.memory.availableMb} MB available (${jobsStatus.resourceSnapshot.memory.availablePercent}%)`
-                : "Unavailable"
-            ],
-            [
-              "Required memory",
-              `${settings?.minFreeMemoryMb ?? "-"} MB free / ${settings?.minAvailableMemoryPercent ?? "-"}% available`
-            ],
-            [
-              "Current disk",
-              jobsStatus ? `${jobsStatus.resourceSnapshot.disk.freeMb} MB free` : "Unavailable"
-            ],
-            ["Free disk threshold", `${settings?.minFreeDiskMb ?? "-"} MB`],
-            [
-              "Current load",
-              jobsStatus ? `${Math.round(jobsStatus.resourceSnapshot.load.oneMinute * 100) / 100}` : "Unavailable"
-            ],
-            ["Recheck interval", `${settings?.resourceRecheckIntervalSeconds ?? "-"} seconds`],
-            ["Worker timeout", `${settings?.codexTurnTimeoutSeconds ?? "-"} seconds`],
-            ["Stale heartbeat", `${settings?.staleHeartbeatSeconds ?? "-"} seconds`],
-            ["Artifact retention", "Recorded by retention class and artifact metadata"],
-            ["Export retention", `Expires per export record; timeout ${settings?.exportTimeoutSeconds ?? "-"} seconds`]
-          ]}
-        />
+        <div className="settings-stack">
+          <SettingsGroup
+            title="Resource Limits"
+            rows={[
+              ["CPU limit", settings?.maxCpuUsagePercent ? `${settings.maxCpuUsagePercent}%` : "Unset"],
+              ["Resource status", jobsStatus?.resourceSnapshot.status ?? "Unavailable"],
+              ["Resource wait reason", jobsStatus?.resourceSnapshot.waitReason ?? "None"],
+              [
+                "Current memory",
+                jobsStatus
+                  ? `${jobsStatus.resourceSnapshot.memory.availableMb} MB available (${jobsStatus.resourceSnapshot.memory.availablePercent}%)`
+                  : "Unavailable"
+              ],
+              [
+                "Required memory",
+                `${settings?.minFreeMemoryMb ?? "-"} MB free / ${settings?.minAvailableMemoryPercent ?? "-"}% available`
+              ],
+              [
+                "Current disk",
+                jobsStatus ? `${jobsStatus.resourceSnapshot.disk.freeMb} MB free` : "Unavailable"
+              ],
+              ["Free disk threshold", `${settings?.minFreeDiskMb ?? "-"} MB`],
+              [
+                "Current load",
+                jobsStatus ? `${Math.round(jobsStatus.resourceSnapshot.load.oneMinute * 100) / 100}` : "Unavailable"
+              ],
+              ["Recheck interval", `${settings?.resourceRecheckIntervalSeconds ?? "-"} seconds`],
+              ["Worker timeout", `${settings?.codexTurnTimeoutSeconds ?? "-"} seconds`],
+              ["Stale heartbeat", `${settings?.staleHeartbeatSeconds ?? "-"} seconds`],
+              ["Artifact retention", "Recorded by retention class and artifact metadata"],
+              ["Export retention", `Expires per export record; timeout ${settings?.exportTimeoutSeconds ?? "-"} seconds`]
+            ]}
+          />
+          <ResourceSettingsForm settings={settings} onSaved={onSettingsSaved} />
+        </div>
       );
     case "security":
       return (
@@ -2684,6 +2693,230 @@ function KeyValueList({
       ))}
     </div>
   );
+}
+
+function DefaultLimitsForm({
+  settings,
+  onSaved
+}: {
+  settings: PublicSettings | null;
+  onSaved: (settings: PublicSettings) => void;
+}) {
+  const [maxExecutionHours, setMaxExecutionHours] = useState(`${settings?.defaultMaxExecutionHours ?? 24}`);
+  const [maxWorkerTurns, setMaxWorkerTurns] = useState(`${settings?.defaultMaxWorkerTurns ?? 200}`);
+  const [retryLimit, setRetryLimit] = useState(`${settings?.defaultRetryLimit ?? 1}`);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("saving");
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        defaultMaxExecutionHours: Number(maxExecutionHours),
+        defaultMaxWorkerTurns: Number(maxWorkerTurns),
+        defaultRetryLimit: Number(retryLimit)
+      })
+    });
+    if (!response.ok) {
+      setStatus("error");
+      return;
+    }
+    onSaved((await response.json()) as PublicSettings);
+    setStatus("saved");
+  }
+
+  return (
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <label>
+        <span>Default max execution hours</span>
+        <input min="1" max="8760" type="number" value={maxExecutionHours} onChange={(event) => setMaxExecutionHours(event.target.value)} />
+      </label>
+      <label>
+        <span>Default max worker turns</span>
+        <input min="1" max="10000" type="number" value={maxWorkerTurns} onChange={(event) => setMaxWorkerTurns(event.target.value)} />
+      </label>
+      <label>
+        <span>Default retry limit</span>
+        <input min="0" max="10" type="number" value={retryLimit} onChange={(event) => setRetryLimit(event.target.value)} />
+      </label>
+      <div className="form-actions">
+        <button type="submit" disabled={status === "saving" || !settings}>
+          {status === "saving" ? "Saving" : "Save Defaults"}
+        </button>
+        <span>{settingsStatusText(status)}</span>
+      </div>
+    </form>
+  );
+}
+
+function ResourceSettingsForm({
+  settings,
+  onSaved
+}: {
+  settings: PublicSettings | null;
+  onSaved: (settings: PublicSettings) => void;
+}) {
+  const [minFreeMemoryMb, setMinFreeMemoryMb] = useState(`${settings?.minFreeMemoryMb ?? 2048}`);
+  const [minAvailableMemoryPercent, setMinAvailableMemoryPercent] = useState(`${settings?.minAvailableMemoryPercent ?? 15}`);
+  const [minFreeDiskMb, setMinFreeDiskMb] = useState(`${settings?.minFreeDiskMb ?? 10240}`);
+  const [codexTurnTimeoutSeconds, setCodexTurnTimeoutSeconds] = useState(`${settings?.codexTurnTimeoutSeconds ?? 3600}`);
+  const [resourceRecheckIntervalSeconds, setResourceRecheckIntervalSeconds] = useState(`${settings?.resourceRecheckIntervalSeconds ?? 60}`);
+  const [workerPollIntervalSeconds, setWorkerPollIntervalSeconds] = useState(`${settings?.workerPollIntervalSeconds ?? 300}`);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("saving");
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        minFreeMemoryMb: Number(minFreeMemoryMb),
+        minAvailableMemoryPercent: Number(minAvailableMemoryPercent),
+        minFreeDiskMb: Number(minFreeDiskMb),
+        codexTurnTimeoutSeconds: Number(codexTurnTimeoutSeconds),
+        resourceRecheckIntervalSeconds: Number(resourceRecheckIntervalSeconds),
+        workerPollIntervalSeconds: Number(workerPollIntervalSeconds)
+      })
+    });
+    if (!response.ok) {
+      setStatus("error");
+      return;
+    }
+    onSaved((await response.json()) as PublicSettings);
+    setStatus("saved");
+  }
+
+  return (
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <label>
+        <span>Min free memory MB</span>
+        <input min="128" type="number" value={minFreeMemoryMb} onChange={(event) => setMinFreeMemoryMb(event.target.value)} />
+      </label>
+      <label>
+        <span>Min available memory percent</span>
+        <input min="1" max="100" type="number" value={minAvailableMemoryPercent} onChange={(event) => setMinAvailableMemoryPercent(event.target.value)} />
+      </label>
+      <label>
+        <span>Min free disk MB</span>
+        <input min="1024" type="number" value={minFreeDiskMb} onChange={(event) => setMinFreeDiskMb(event.target.value)} />
+      </label>
+      <label>
+        <span>Codex turn timeout seconds</span>
+        <input min="60" type="number" value={codexTurnTimeoutSeconds} onChange={(event) => setCodexTurnTimeoutSeconds(event.target.value)} />
+      </label>
+      <label>
+        <span>Resource recheck seconds</span>
+        <input min="10" type="number" value={resourceRecheckIntervalSeconds} onChange={(event) => setResourceRecheckIntervalSeconds(event.target.value)} />
+      </label>
+      <label>
+        <span>Worker poll seconds</span>
+        <input min="30" type="number" value={workerPollIntervalSeconds} onChange={(event) => setWorkerPollIntervalSeconds(event.target.value)} />
+      </label>
+      <div className="form-actions">
+        <button type="submit" disabled={status === "saving" || !settings}>
+          {status === "saving" ? "Saving" : "Save Resources"}
+        </button>
+        <span>{settingsStatusText(status)}</span>
+      </div>
+    </form>
+  );
+}
+
+function SmtpSettingsForm({ onSaved }: { onSaved: (settings: PublicSettings) => void }) {
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("587");
+  const [secure, setSecure] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [fromEmail, setFromEmail] = useState("");
+  const [recipientEmail, setRecipientEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("saving");
+    const response = await fetch("/api/settings/smtp", {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        host,
+        port: Number(port),
+        secure,
+        username,
+        password,
+        fromEmail,
+        recipientEmail
+      })
+    });
+    if (!response.ok) {
+      setStatus("error");
+      return;
+    }
+    setPassword("");
+    onSaved((await response.json()) as PublicSettings);
+    setStatus("saved");
+  }
+
+  return (
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <label>
+        <span>SMTP host</span>
+        <input value={host} onChange={(event) => setHost(event.target.value)} />
+      </label>
+      <label>
+        <span>SMTP port</span>
+        <input min="1" max="65535" type="number" value={port} onChange={(event) => setPort(event.target.value)} />
+      </label>
+      <label>
+        <span>Username</span>
+        <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
+      </label>
+      <label>
+        <span>Password</span>
+        <input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+      </label>
+      <label>
+        <span>From email</span>
+        <input type="email" value={fromEmail} onChange={(event) => setFromEmail(event.target.value)} />
+      </label>
+      <label>
+        <span>Recipient email</span>
+        <input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} />
+      </label>
+      <label className="checkbox-label">
+        <input type="checkbox" checked={secure} onChange={(event) => setSecure(event.target.checked)} />
+        <span>Use TLS</span>
+      </label>
+      <div className="form-actions">
+        <button type="submit" disabled={status === "saving"}>
+          {status === "saving" ? "Saving" : "Save SMTP"}
+        </button>
+        <span>{settingsStatusText(status)}</span>
+      </div>
+    </form>
+  );
+}
+
+function settingsStatusText(status: "idle" | "saving" | "saved" | "error"): string {
+  if (status === "saved") {
+    return "Saved.";
+  }
+  if (status === "error") {
+    return "Save failed.";
+  }
+  return "Changes apply to new jobs and projects.";
 }
 
 function PasswordChangeForm() {
