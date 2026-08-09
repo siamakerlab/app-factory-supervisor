@@ -2,7 +2,13 @@
   color: #17202a;
   background: #eef2f6;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -25,18 +31,27 @@ button {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  --sidebar-width: 248px;
+  --sidebar-collapsed-width: 76px;
   min-height: 100vh;
 }
 
+.app-shell.sidebar-collapsed {
+  --sidebar-width: var(--sidebar-collapsed-width);
+}
+
 .sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
   display: flex;
   flex-direction: column;
+  width: var(--sidebar-width);
   min-height: 100vh;
   padding: 16px;
   color: #f7fafc;
   background: #14202d;
+  transition: width 160ms ease;
 }
 
 .brand {
@@ -46,14 +61,35 @@ button {
   height: 44px;
 }
 
+.brand svg,
+.nav-item svg,
+.logout-button svg,
+.sidebar-toggle svg {
+  flex: 0 0 auto;
+}
+
 .brand div {
   display: grid;
   gap: 1px;
+  min-width: 0;
 }
 
 .brand span {
   color: #a7b4c2;
   font-size: 12px;
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border-color: #34475d;
+  border-radius: 6px;
+  color: #edf2f7;
+  background: #1d2a3a;
 }
 
 .nav-list {
@@ -68,9 +104,12 @@ button {
   gap: 10px;
   min-height: 38px;
   padding: 0 10px;
+  border: 0;
   border-radius: 6px;
   color: #c9d3df;
+  background: transparent;
   text-decoration: none;
+  text-align: left;
 }
 
 .nav-item.active,
@@ -99,9 +138,36 @@ button {
   background: #1d2a3a;
 }
 
+.sidebar-collapsed .sidebar {
+  padding-inline: 12px;
+}
+
+.sidebar-collapsed .brand {
+  justify-content: center;
+}
+
+.sidebar-collapsed .brand-text,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .logout-label,
+.sidebar-collapsed .version-label {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-toggle {
+  margin-left: 0;
+}
+
+.sidebar-collapsed .nav-item,
+.sidebar-collapsed .logout-button {
+  justify-content: center;
+  padding-inline: 0;
+}
+
 .workspace {
   min-width: 0;
+  margin-left: var(--sidebar-width);
   padding: 22px;
+  transition: margin-left 160ms ease;
 }
 
 .topbar {
@@ -1013,12 +1079,39 @@ button {
 }
 
 @media (max-width: 860px) {
-  .app-shell {
-    grid-template-columns: 1fr;
+  .app-shell,
+  .app-shell.sidebar-collapsed {
+    --sidebar-width: 76px;
   }
 
   .sidebar {
-    min-height: auto;
+    padding-inline: 12px;
+  }
+
+  .brand {
+    justify-content: center;
+  }
+
+  .brand-text,
+  .nav-label,
+  .logout-label,
+  .version-label {
+    display: none;
+  }
+
+  .sidebar-toggle {
+    margin-left: 0;
+  }
+
+  .nav-item,
+  .logout-button {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .workspace {
+    margin-left: var(--sidebar-width);
+    padding: 14px;
   }
 
   .panel-grid {

@@ -4,6 +4,8 @@ import {
   Bell,
   Box,
   CheckCircle2,
+  ChevronsLeft,
+  ChevronsRight,
   Clock3,
   Database,
   FolderKanban,
@@ -51,6 +53,8 @@ type SessionResponse = {
     expiresAt: string;
   };
 };
+
+type MainPage = "projects" | "build" | "settings";
 
 type Fail2banResponse = {
   attempts: Array<{
@@ -460,13 +464,7 @@ type JobSummary = {
     | "notification"
     | "project_export";
   status:
-    | "queued"
-    | "waiting_resources"
-    | "running"
-    | "succeeded"
-    | "failed"
-    | "cancelled"
-    | "stale";
+    "queued" | "waiting_resources" | "running" | "succeeded" | "failed" | "cancelled" | "stale";
   resourceWaitReason: string | null;
   heartbeatAt: string | null;
   timeoutAt: string | null;
@@ -506,14 +504,7 @@ type JobsStatusResponse = {
 };
 
 type SettingsTab =
-  | "user"
-  | "email"
-  | "build"
-  | "credentials"
-  | "defaults"
-  | "resources"
-  | "security"
-  | "fail2ban";
+  "user" | "email" | "build" | "credentials" | "defaults" | "resources" | "security" | "fail2ban";
 
 type KeyValueRows = Array<[string, string]>;
 
@@ -548,11 +539,15 @@ const timelineRows = [
 ];
 
 export function App() {
+  const [currentPage, setCurrentPage] = useState<MainPage>("projects");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("user");
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [fail2ban, setFail2ban] = useState<Fail2banResponse | null>(null);
-  const [securityIsolation, setSecurityIsolation] = useState<SecurityIsolationResponse | null>(null);
+  const [securityIsolation, setSecurityIsolation] = useState<SecurityIsolationResponse | null>(
+    null
+  );
   const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
     null
   );
@@ -1079,7 +1074,15 @@ export function App() {
     [apiState, codexAuth, jobsStatus]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility, codexAuth, codexHooks, codexDocs, toolchain, capabilities),
+    () =>
+      createBuildRows(
+        codexCompatibility,
+        codexAuth,
+        codexHooks,
+        codexDocs,
+        toolchain,
+        capabilities
+      ),
     [codexCompatibility, codexAuth, codexHooks, codexDocs, toolchain, capabilities]
   );
 
@@ -1138,34 +1141,67 @@ export function App() {
     );
   }
 
+  const pageTitle =
+    currentPage === "projects"
+      ? "Projects"
+      : currentPage === "build"
+        ? "Build Environment"
+        : "Settings";
+  const pageDescription =
+    currentPage === "projects"
+      ? "Android/Kotlin automation dashboard for Codex worker runs."
+      : currentPage === "build"
+        ? "Toolchain, Codex login, MCP, skills, agents, and runtime readiness."
+        : "Single-user administration and operational configuration.";
+
   return (
-    <div className="app-shell">
+    <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <aside className="sidebar">
         <div className="brand">
           <Box size={20} />
-          <div>
+          <div className="brand-text">
             <strong>App Factory</strong>
             <span>Supervisor</span>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+          >
+            {sidebarCollapsed ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
+          </button>
         </div>
 
         <nav className="nav-list" aria-label="Primary">
-          <a className="nav-item active" href="#projects">
+          <button
+            type="button"
+            className={currentPage === "projects" ? "nav-item active" : "nav-item"}
+            onClick={() => setCurrentPage("projects")}
+          >
             <FolderKanban size={18} />
-            Projects
-          </a>
-          <a className="nav-item" href="#build-environment">
+            <span className="nav-label">Projects</span>
+          </button>
+          <button
+            type="button"
+            className={currentPage === "build" ? "nav-item active" : "nav-item"}
+            onClick={() => setCurrentPage("build")}
+          >
             <ServerCog size={18} />
-            Build Environment
-          </a>
-          <a className="nav-item" href="#settings">
+            <span className="nav-label">Build Environment</span>
+          </button>
+          <button
+            type="button"
+            className={currentPage === "settings" ? "nav-item active" : "nav-item"}
+            onClick={() => setCurrentPage("settings")}
+          >
             <Settings size={18} />
-            Settings
-          </a>
+            <span className="nav-label">Settings</span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
-          <span>v0.1.0</span>
+          <span className="version-label">v0.1.0</span>
           <button
             type="button"
             className="logout-button"
@@ -1173,7 +1209,7 @@ export function App() {
             onClick={() => void logout()}
           >
             <LogOut size={17} />
-            Log out
+            <span className="logout-label">Log out</span>
           </button>
         </div>
       </aside>
@@ -1181,8 +1217,8 @@ export function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>Projects</h1>
-            <p>Android/Kotlin automation dashboard for Codex worker runs.</p>
+            <h1>{pageTitle}</h1>
+            <p>{pageDescription}</p>
           </div>
           <div className="status-strip">
             <span>
@@ -1196,7 +1232,7 @@ export function App() {
           </div>
         </header>
 
-        {setup && !setup.setupComplete ? (
+        {currentPage === "build" && setup && !setup.setupComplete ? (
           <WizardPanel
             setup={setup}
             apiState={apiState}
@@ -1208,278 +1244,293 @@ export function App() {
           />
         ) : null}
 
-        <section id="projects" className="panel-grid">
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>Project Queue</h2>
-              <button
-                type="button"
-                disabled={apiState !== "ready"}
-                onClick={() => setProjectWizardOpen((value) => !value)}
-              >
-                {projectWizardOpen ? "Close" : "New Project"}
-              </button>
-            </div>
-            {projectWizardOpen ? (
-              <ProjectWizard
-                settings={settings}
-                onCreated={() => {
-                  setProjectWizardOpen(false);
-                  void loadApiState();
-                }}
-              />
-            ) : null}
-            <div className="table">
-              <div className="table-row table-head">
-                <span>Project</span>
-                <span>Phase</span>
-                <span>Progress</span>
-                <span>Version</span>
-                <span>Status</span>
-                <span>Actions</span>
+        {currentPage === "projects" ? (
+          <section className="panel-grid">
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Project Queue</h2>
+                <button
+                  type="button"
+                  disabled={apiState !== "ready"}
+                  onClick={() => setProjectWizardOpen((value) => !value)}
+                >
+                  {projectWizardOpen ? "Close" : "New Project"}
+                </button>
               </div>
-              {projects.length === 0 ? (
-                <div className="table-row">
-                  <span>No active project</span>
-                  <span>Waiting for project wizard</span>
-                  <span>
-                    <span className="progress-track">
-                      <span style={{ width: "0%" }} />
-                    </span>
-                  </span>
-                  <span>None</span>
-                  <span className="chip muted">Setup required</span>
-                  <span />
-                </div>
+              {projectWizardOpen ? (
+                <ProjectWizard
+                  settings={settings}
+                  onCreated={() => {
+                    setProjectWizardOpen(false);
+                    void loadApiState();
+                  }}
+                />
               ) : null}
-              {projects.map((project) => (
-                <div
-                  className={selectedProjectId === project.id ? "table-row selected" : "table-row"}
-                  key={project.id}
-                >
-                  <span>{project.projectName}</span>
-                  <span>{project.currentPhase}</span>
-                  <span>
-                    <span className="progress-track">
-                      <span
-                        style={{
-                          width: `${projectDetail?.id === project.id ? projectDetail.progress.percent : projectProgress(project)}%`
-                        }}
-                      />
-                    </span>
-                  </span>
-                  <span title={versionTitle(project)}>{project.currentVersion ?? "No version"}</span>
-                  <span className={project.status === "running" ? "chip" : "chip muted"}>
-                    {project.status}
-                  </span>
-                  <span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProjectId(project.id)}
-                    >
-                      Detail
-                    </button>
-                    <button
-                      type="button"
-                      disabled={exportBusyProjectId === project.id}
-                      onClick={() => void requestProjectExport(project.id)}
-                    >
-                      {exportBusyProjectId === project.id ? "Zipping" : "ZIP"}
-                    </button>
-                  </span>
+              <div className="table">
+                <div className="table-row table-head">
+                  <span>Project</span>
+                  <span>Phase</span>
+                  <span>Progress</span>
+                  <span>Version</span>
+                  <span>Status</span>
+                  <span>Actions</span>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>Project Detail</h2>
-              <span className="chip muted">
-                {projectDetail ? `${projectDetail.progress.percent}% gates` : "No project selected"}
-              </span>
-            </div>
-            {projectDetail ? (
-              <ProjectDetailPanel
-                project={projectDetail}
-                exportBusy={exportBusyProjectId === projectDetail.id}
-                onExport={() => void requestProjectExport(projectDetail.id)}
-                checklistBusyKey={checklistBusyKey}
-                onChecklistUpdate={(itemKey, status) =>
-                  void updateChecklistItem(projectDetail.id, itemKey, status)
-                }
-                onSupervisorInstruction={(input) =>
-                  void queueSupervisorInstruction(projectDetail.id, input)
-                }
-                runBusy={runBusyProjectId === projectDetail.id}
-                onStartRun={() => void startProjectRun(projectDetail.id)}
-                onStopRun={() => void stopProjectRun(projectDetail.id)}
-                completionGate={completionGate?.projectId === projectDetail.id ? completionGate : null}
-                onCompletionGate={() => void runCompletionGate(projectDetail.id)}
-              />
-            ) : (
-              <p className="muted-copy">Select a project to inspect progress, timeline, and artifacts.</p>
-            )}
-          </div>
-
-          <div id="build-environment" className="panel">
-            <div className="panel-heading">
-              <h2>Build Environment</h2>
-              <div className="button-row">
-                <button
-                  type="button"
-                  disabled={apiState !== "ready" || capabilityBusy}
-                  onClick={() => void runCapabilityInstall()}
-                >
-                  {capabilityBusy ? "Wiring" : "Install Capabilities"}
-                </button>
-                <button
-                  type="button"
-                  disabled={apiState !== "ready" || toolchainBusy}
-                  onClick={() => void runToolchainInstall()}
-                >
-                  {toolchainBusy ? "Installing" : "Install Tools"}
-                </button>
-                <button
-                  type="button"
-                  disabled={apiState !== "ready" || codexDocsBusy}
-                  onClick={() => void runCodexDocsIndex()}
-                >
-                  {codexDocsBusy ? "Indexing" : "Index Docs"}
-                </button>
-                <button
-                  type="button"
-                  disabled={apiState !== "ready" || codexReviewBusy}
-                  onClick={() => void runCodexCompatibilityReview()}
-                >
-                  {codexReviewBusy ? "Checking" : "Verify Codex"}
-                </button>
-                {codexAuth?.login?.status === "waiting_for_user" ? (
-                  <button
-                    type="button"
-                    disabled={codexAuthBusy}
-                    onClick={() => void cancelCodexDeviceLogin()}
+                {projects.length === 0 ? (
+                  <div className="table-row">
+                    <span>No active project</span>
+                    <span>Waiting for project wizard</span>
+                    <span>
+                      <span className="progress-track">
+                        <span style={{ width: "0%" }} />
+                      </span>
+                    </span>
+                    <span>None</span>
+                    <span className="chip muted">Setup required</span>
+                    <span />
+                  </div>
+                ) : null}
+                {projects.map((project) => (
+                  <div
+                    className={
+                      selectedProjectId === project.id ? "table-row selected" : "table-row"
+                    }
+                    key={project.id}
                   >
-                    {codexAuthBusy ? "Cancelling" : "Cancel Login"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={apiState !== "ready" || codexAuthBusy}
-                    onClick={() => void startCodexDeviceLogin()}
-                  >
-                    {codexAuthBusy ? "Starting" : "Login Codex"}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={apiState !== "ready" || hooksBusy}
-                  onClick={() => void installManagedHooks()}
-                >
-                  {hooksBusy ? "Installing" : "Install Hooks"}
-                </button>
+                    <span>{project.projectName}</span>
+                    <span>{project.currentPhase}</span>
+                    <span>
+                      <span className="progress-track">
+                        <span
+                          style={{
+                            width: `${projectDetail?.id === project.id ? projectDetail.progress.percent : projectProgress(project)}%`
+                          }}
+                        />
+                      </span>
+                    </span>
+                    <span title={versionTitle(project)}>
+                      {project.currentVersion ?? "No version"}
+                    </span>
+                    <span className={project.status === "running" ? "chip" : "chip muted"}>
+                      {project.status}
+                    </span>
+                    <span>
+                      <button type="button" onClick={() => setSelectedProjectId(project.id)}>
+                        Detail
+                      </button>
+                      <button
+                        type="button"
+                        disabled={exportBusyProjectId === project.id}
+                        onClick={() => void requestProjectExport(project.id)}
+                      >
+                        {exportBusyProjectId === project.id ? "Zipping" : "ZIP"}
+                      </button>
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
-            <CodexDeviceLoginPanel codexAuth={codexAuth} />
-            <KeyValueList rows={buildEnvironmentRows} />
-          </div>
 
-          <div className="panel">
-            <div className="panel-heading">
-              <h2>Supervisor Loop</h2>
-              <Workflow size={18} />
-            </div>
-            <ol className="timeline">
-              {timelineRows.map((row) => (
-                <li key={row}>
-                  <Clock3 size={16} />
-                  <span>{row}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>System Readiness</h2>
-              <CheckCircle2 size={18} />
-            </div>
-            <KeyValueList className="readiness-grid" rows={readiness} />
-          </div>
-
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>Job Runner</h2>
-              <Activity size={18} />
-            </div>
-            <JobRunnerPanel jobsStatus={jobsStatus} />
-          </div>
-
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>Recent Artifacts</h2>
-              <Database size={18} />
-            </div>
-            <ArtifactTable artifacts={artifacts} />
-          </div>
-
-          <div className="panel wide">
-            <div className="panel-heading">
-              <h2>Project Exports</h2>
-              <Database size={18} />
-            </div>
-            <ProjectExportTable exports={projectExports} />
-          </div>
-        </section>
-
-        <section id="settings" className="settings-section">
-          <div className="section-heading">
-            <h2>Settings</h2>
-            <span className="chip muted">Single-user administration</span>
-          </div>
-          <div className="settings-layout">
-            <div className="tab-list" role="tablist" aria-label="Settings sections">
-              {settingsTabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === tab.id}
-                    className={activeTab === tab.id ? "tab-button active" : "tab-button"}
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    <Icon size={17} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="settings-panel" role="tabpanel">
-              {renderSettingsTab(
-                activeTab,
-                settings,
-                session,
-                fail2ban,
-                securityIsolation,
-                codexCompatibility,
-                codexAuth,
-                codexHooks,
-                codexDocs,
-                toolchain,
-                capabilities,
-                jobsStatus,
-                buildEnvironmentRows,
-                apiState,
-                testEmailResult,
-                (nextSettings) => setSettings(nextSettings),
-                () => void sendTestEmail()
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Project Detail</h2>
+                <span className="chip muted">
+                  {projectDetail
+                    ? `${projectDetail.progress.percent}% gates`
+                    : "No project selected"}
+                </span>
+              </div>
+              {projectDetail ? (
+                <ProjectDetailPanel
+                  project={projectDetail}
+                  exportBusy={exportBusyProjectId === projectDetail.id}
+                  onExport={() => void requestProjectExport(projectDetail.id)}
+                  checklistBusyKey={checklistBusyKey}
+                  onChecklistUpdate={(itemKey, status) =>
+                    void updateChecklistItem(projectDetail.id, itemKey, status)
+                  }
+                  onSupervisorInstruction={(input) =>
+                    void queueSupervisorInstruction(projectDetail.id, input)
+                  }
+                  runBusy={runBusyProjectId === projectDetail.id}
+                  onStartRun={() => void startProjectRun(projectDetail.id)}
+                  onStopRun={() => void stopProjectRun(projectDetail.id)}
+                  completionGate={
+                    completionGate?.projectId === projectDetail.id ? completionGate : null
+                  }
+                  onCompletionGate={() => void runCompletionGate(projectDetail.id)}
+                />
+              ) : (
+                <p className="muted-copy">
+                  Select a project to inspect progress, timeline, and artifacts.
+                </p>
               )}
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
+
+        {currentPage === "build" ? (
+          <section className="panel-grid">
+            <div className="panel">
+              <div className="panel-heading">
+                <h2>Build Environment</h2>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || capabilityBusy}
+                    onClick={() => void runCapabilityInstall()}
+                  >
+                    {capabilityBusy ? "Wiring" : "Install Capabilities"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || toolchainBusy}
+                    onClick={() => void runToolchainInstall()}
+                  >
+                    {toolchainBusy ? "Installing" : "Install Tools"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || codexDocsBusy}
+                    onClick={() => void runCodexDocsIndex()}
+                  >
+                    {codexDocsBusy ? "Indexing" : "Index Docs"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || codexReviewBusy}
+                    onClick={() => void runCodexCompatibilityReview()}
+                  >
+                    {codexReviewBusy ? "Checking" : "Verify Codex"}
+                  </button>
+                  {codexAuth?.login?.status === "waiting_for_user" ? (
+                    <button
+                      type="button"
+                      disabled={codexAuthBusy}
+                      onClick={() => void cancelCodexDeviceLogin()}
+                    >
+                      {codexAuthBusy ? "Cancelling" : "Cancel Login"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={apiState !== "ready" || codexAuthBusy}
+                      onClick={() => void startCodexDeviceLogin()}
+                    >
+                      {codexAuthBusy ? "Starting" : "Login Codex"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={apiState !== "ready" || hooksBusy}
+                    onClick={() => void installManagedHooks()}
+                  >
+                    {hooksBusy ? "Installing" : "Install Hooks"}
+                  </button>
+                </div>
+              </div>
+              <CodexDeviceLoginPanel codexAuth={codexAuth} />
+              <KeyValueList rows={buildEnvironmentRows} />
+            </div>
+
+            <div className="panel">
+              <div className="panel-heading">
+                <h2>Supervisor Loop</h2>
+                <Workflow size={18} />
+              </div>
+              <ol className="timeline">
+                {timelineRows.map((row) => (
+                  <li key={row}>
+                    <Clock3 size={16} />
+                    <span>{row}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>System Readiness</h2>
+                <CheckCircle2 size={18} />
+              </div>
+              <KeyValueList className="readiness-grid" rows={readiness} />
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Job Runner</h2>
+                <Activity size={18} />
+              </div>
+              <JobRunnerPanel jobsStatus={jobsStatus} />
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Recent Artifacts</h2>
+                <Database size={18} />
+              </div>
+              <ArtifactTable artifacts={artifacts} />
+            </div>
+
+            <div className="panel wide">
+              <div className="panel-heading">
+                <h2>Project Exports</h2>
+                <Database size={18} />
+              </div>
+              <ProjectExportTable exports={projectExports} />
+            </div>
+          </section>
+        ) : null}
+
+        {currentPage === "settings" ? (
+          <section className="settings-section">
+            <div className="section-heading">
+              <h2>Settings</h2>
+              <span className="chip muted">Single-user administration</span>
+            </div>
+            <div className="settings-layout">
+              <div className="tab-list" role="tablist" aria-label="Settings sections">
+                {settingsTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeTab === tab.id}
+                      className={activeTab === tab.id ? "tab-button active" : "tab-button"}
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      <Icon size={17} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="settings-panel" role="tabpanel">
+                {renderSettingsTab(
+                  activeTab,
+                  settings,
+                  session,
+                  fail2ban,
+                  securityIsolation,
+                  codexCompatibility,
+                  codexAuth,
+                  codexHooks,
+                  codexDocs,
+                  toolchain,
+                  capabilities,
+                  jobsStatus,
+                  buildEnvironmentRows,
+                  apiState,
+                  testEmailResult,
+                  (nextSettings) => setSettings(nextSettings),
+                  () => void sendTestEmail()
+                )}
+              </div>
+            </div>
+          </section>
+        ) : null}
       </main>
     </div>
   );
@@ -1546,7 +1597,10 @@ function WizardPanel({
           </button>
           <div className="command-checks">
             {setup.commandChecks.slice(0, 10).map((check) => (
-              <span className={check.status === "pass" ? "check-pass" : "check-fail"} key={check.id}>
+              <span
+                className={check.status === "pass" ? "check-pass" : "check-fail"}
+                key={check.id}
+              >
                 {check.command}: {check.status}
               </span>
             ))}
@@ -1679,7 +1733,9 @@ function InitialAdminSetupPanel({ onConfigured }: { onConfigured: () => void }) 
         <h2>Create Admin Account</h2>
         <LockKeyhole size={18} />
       </div>
-      <p className="muted-copy">No admin account exists yet. Create the single admin account first.</p>
+      <p className="muted-copy">
+        No admin account exists yet. Create the single admin account first.
+      </p>
       <CreateAdminForm busy={busy === "admin"} setBusy={setBusy} onReload={onConfigured} />
     </section>
   );
@@ -1760,7 +1816,11 @@ function ProjectDetailPanel({
               <button type="button" disabled={runBusy} onClick={onStartRun}>
                 {runBusy ? "Working" : "Queue Turn"}
               </button>
-              <button type="button" disabled={runBusy || project.status !== "running"} onClick={onStopRun}>
+              <button
+                type="button"
+                disabled={runBusy || project.status !== "running"}
+                onClick={onStopRun}
+              >
                 Stop
               </button>
               <button type="button" onClick={onCompletionGate}>
@@ -1821,17 +1881,24 @@ function ProjectDetailPanel({
         </div>
         <ol className="run-history">
           {project.timeline.map((event) => (
-            <li className={event.eventType === "supervisor_prompt_sent" ? "supervisor" : "worker"} key={event.id}>
+            <li
+              className={event.eventType === "supervisor_prompt_sent" ? "supervisor" : "worker"}
+              key={event.id}
+            >
               <div>
                 <strong>
-                  {event.eventType === "supervisor_prompt_sent" ? "Supervisor prompt" : "Worker final response"}
+                  {event.eventType === "supervisor_prompt_sent"
+                    ? "Supervisor prompt"
+                    : "Worker final response"}
                 </strong>
                 <span>
                   Iteration {event.iteration ?? "-"} · {event.createdAt}
                 </span>
               </div>
               <p>{compactText(event.body ?? "No message body.", 900)}</p>
-              {event.artifactId ? <a href={`/api/artifacts/${event.artifactId}/content`}>Artifact</a> : null}
+              {event.artifactId ? (
+                <a href={`/api/artifacts/${event.artifactId}/content`}>Artifact</a>
+              ) : null}
             </li>
           ))}
           {project.timeline.length === 0 ? <li>No prompt/response history recorded.</li> : null}
@@ -1912,7 +1979,10 @@ function ProjectDetailPanel({
             onChange={(event) => setInstruction(event.target.value)}
           />
           <div>
-            <select value={priority} onChange={(event) => setPriority(event.target.value as typeof priority)}>
+            <select
+              value={priority}
+              onChange={(event) => setPriority(event.target.value as typeof priority)}
+            >
               <option value="low">Low</option>
               <option value="normal">Normal</option>
               <option value="high">High</option>
@@ -1959,7 +2029,9 @@ function ProjectDetailPanel({
               <div className="mini-row" key={artifact.id}>
                 <span>{artifact.artifactType}</span>
                 <span>{artifact.sizeBytes ? `${artifact.sizeBytes} bytes` : "unknown"}</span>
-                <a href={`/api/artifacts/${artifact.id}/content`}>{artifact.redacted ? "metadata" : "download"}</a>
+                <a href={`/api/artifacts/${artifact.id}/content`}>
+                  {artifact.redacted ? "metadata" : "download"}
+                </a>
               </div>
             ))}
           </div>
@@ -2021,7 +2093,9 @@ function ProjectWizard({
   );
   const [maxWorkerTurns, setMaxWorkerTurns] = useState(`${settings?.defaultMaxWorkerTurns ?? 200}`);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [message, setMessage] = useState("New projects generate a release keystore. Existing projects upload it later.");
+  const [message, setMessage] = useState(
+    "New projects generate a release keystore. Existing projects upload it later."
+  );
 
   async function submitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2312,7 +2386,10 @@ function renderSettingsTab(
               ["SMTP/provider", settings?.smtpConfigured ? "Configured" : "Not configured"],
               ["Recipient", settings?.notificationRecipientEmail ?? "Not configured"],
               ["Test email", testEmailResult ?? "Not sent"],
-              ["Terminal status toggle", settings?.emailNotificationsEnabled ? "Enabled" : "Disabled"]
+              [
+                "Terminal status toggle",
+                settings?.emailNotificationsEnabled ? "Enabled" : "Disabled"
+              ]
             ]}
           />
           <button type="button" onClick={onTestEmail} disabled={!settings?.smtpConfigured}>
@@ -2382,7 +2459,10 @@ function renderSettingsTab(
               ["Docs index status", codexCompatibility?.codexDocIndexStatus ?? "not_started"],
               ["Config validation", boolLabel(codexCompatibility?.configValidationPassed)],
               ["Stop hook callback", boolLabel(codexCompatibility?.stopHookCallbackVerified)],
-              ["Schema artifact", codexCompatibility?.generatedSchemaPaths.jsonSchema ?? "Unavailable"],
+              [
+                "Schema artifact",
+                codexCompatibility?.generatedSchemaPaths.jsonSchema ?? "Unavailable"
+              ],
               ["Review artifact", codexCompatibility?.artifactPath ?? "Unavailable"],
               ["Gap summary", codexCompatibility?.gapSummary ?? "Review has not run."]
             ]}
@@ -2414,7 +2494,10 @@ function renderSettingsTab(
               ["Store path", codexDocs?.storePath ?? "Unavailable"],
               ["Index artifact", codexDocs?.artifactPath ?? "Unavailable"],
               ["Indexed at", codexDocs?.indexedAt ?? "Never"],
-              ["Gap report", codexDocs?.gapReport ?? "Codex official documentation has not been indexed."]
+              [
+                "Gap report",
+                codexDocs?.gapReport ?? "Codex official documentation has not been indexed."
+              ]
             ]}
           />
         </div>
@@ -2442,7 +2525,10 @@ function renderSettingsTab(
           <SettingsGroup
             title="Resource Limits"
             rows={[
-              ["CPU limit", settings?.maxCpuUsagePercent ? `${settings.maxCpuUsagePercent}%` : "Unset"],
+              [
+                "CPU limit",
+                settings?.maxCpuUsagePercent ? `${settings.maxCpuUsagePercent}%` : "Unset"
+              ],
               ["Resource status", jobsStatus?.resourceSnapshot.status ?? "Unavailable"],
               ["Resource wait reason", jobsStatus?.resourceSnapshot.waitReason ?? "None"],
               [
@@ -2462,13 +2548,18 @@ function renderSettingsTab(
               ["Free disk threshold", `${settings?.minFreeDiskMb ?? "-"} MB`],
               [
                 "Current load",
-                jobsStatus ? `${Math.round(jobsStatus.resourceSnapshot.load.oneMinute * 100) / 100}` : "Unavailable"
+                jobsStatus
+                  ? `${Math.round(jobsStatus.resourceSnapshot.load.oneMinute * 100) / 100}`
+                  : "Unavailable"
               ],
               ["Recheck interval", `${settings?.resourceRecheckIntervalSeconds ?? "-"} seconds`],
               ["Worker timeout", `${settings?.codexTurnTimeoutSeconds ?? "-"} seconds`],
               ["Stale heartbeat", `${settings?.staleHeartbeatSeconds ?? "-"} seconds`],
               ["Artifact retention", "Recorded by retention class and artifact metadata"],
-              ["Export retention", `Expires per export record; timeout ${settings?.exportTimeoutSeconds ?? "-"} seconds`]
+              [
+                "Export retention",
+                `Expires per export record; timeout ${settings?.exportTimeoutSeconds ?? "-"} seconds`
+              ]
             ]}
           />
           <ResourceSettingsForm settings={settings} onSaved={onSettingsSaved} />
@@ -2492,8 +2583,14 @@ function renderSettingsTab(
               ["App data", securityIsolation?.appDataDir ?? "Unavailable"],
               ["Codex home", securityIsolation?.codexHomeDir ?? "Unavailable"],
               ["App secrets", securityIsolation?.appSecretsDir ?? "Unavailable"],
-              ["Environment allowlist", securityIsolation?.environmentAllowlist.join(", ") ?? "Unavailable"],
-              ["Denied app-global paths", securityIsolation?.deniedAppGlobalPaths.join("; ") ?? "Unavailable"],
+              [
+                "Environment allowlist",
+                securityIsolation?.environmentAllowlist.join(", ") ?? "Unavailable"
+              ],
+              [
+                "Denied app-global paths",
+                securityIsolation?.deniedAppGlobalPaths.join("; ") ?? "Unavailable"
+              ],
               ["Hook trust", "Bypassed for managed yolo runs"],
               ["Secret redaction", "Prompt/log/email policy enabled"],
               ["Host fail2ban integration", "Template provided"]
@@ -2564,42 +2661,70 @@ function createBuildRows(
     ...(capabilities?.conflictSummary ? [capabilities.conflictSummary] : [])
   ];
   return [
-    ["Android SDK", toolchain?.latestSnapshot ? toolchain.latestSnapshot.androidPlatformVersion : "Not installed"],
+    [
+      "Android SDK",
+      toolchain?.latestSnapshot ? toolchain.latestSnapshot.androidPlatformVersion : "Not installed"
+    ],
     ["Gradle", toolchain?.latestSnapshot?.gradleVersion ?? "Not installed"],
     ["JDK", toolchain?.latestSnapshot?.jdkVersion ?? "Not installed"],
-    ["Toolchain snapshots", toolchain?.latestSnapshot ? toolchain.latestSnapshot.snapshotName : "None"],
+    [
+      "Toolchain snapshots",
+      toolchain?.latestSnapshot ? toolchain.latestSnapshot.snapshotName : "None"
+    ],
     ["AVD/emulator", toolchain?.latestSnapshot?.emulatorImage ?? "Not verified"],
     ["Toolchain install", toolchain?.status ?? "not_started"],
-    ["Toolchain blockers", toolchain?.errorSummary ?? failedStepSummary(toolchain?.steps) ?? "None"],
+    [
+      "Toolchain blockers",
+      toolchain?.errorSummary ?? failedStepSummary(toolchain?.steps) ?? "None"
+    ],
     ["MCP status", capabilityTypeLabel(capabilities, "mcp")],
-    ["Skill/agent wiring", `${capabilityTypeLabel(capabilities, "skill")} / ${capabilityTypeLabel(capabilities, "agent")}`],
-    ["Codex CLI version", codexCompatibility?.codexCliVersion ?? codexHooks?.codexCliVersion ?? "Unknown"],
+    [
+      "Skill/agent wiring",
+      `${capabilityTypeLabel(capabilities, "skill")} / ${capabilityTypeLabel(capabilities, "agent")}`
+    ],
+    [
+      "Codex CLI version",
+      codexCompatibility?.codexCliVersion ?? codexHooks?.codexCliVersion ?? "Unknown"
+    ],
     ["Codex device auth", codexAuth?.authenticated ? "Logged in" : "Not logged in"],
     ["Codex auth file", codexAuth?.authFilePresent ? "Present" : "Missing"],
     ["Device login", codexAuth?.login?.status ?? "idle"],
     ["Compatibility auth smoke", boolLabel(codexCompatibility?.codexAuthUsable)],
-    ["Codex JSONL dry-run", boolLabel(codexCompatibility?.jsonModeSupported && codexCompatibility.outputLastMessageSupported)],
+    [
+      "Codex JSONL dry-run",
+      boolLabel(
+        codexCompatibility?.jsonModeSupported && codexCompatibility.outputLastMessageSupported
+      )
+    ],
     ["App-server TS schema", boolLabel(codexCompatibility?.appServerTypeScriptSchemasGenerated)],
     ["App-server JSON schema", boolLabel(codexCompatibility?.appServerJsonSchemasGenerated)],
     ["Config schema validation", boolLabel(codexCompatibility?.configValidationPassed)],
     ["Stop hook callback", boolLabel(codexCompatibility?.stopHookCallbackVerified)],
-    ["Managed config owner", codexHooks?.configOwner ?? codexCompatibility?.ownership.configOwner ?? "missing"],
-    ["Managed hook owner", codexHooks?.hooksOwner ?? codexCompatibility?.ownership.hooksOwner ?? "missing"],
+    [
+      "Managed config owner",
+      codexHooks?.configOwner ?? codexCompatibility?.ownership.configOwner ?? "missing"
+    ],
+    [
+      "Managed hook owner",
+      codexHooks?.hooksOwner ?? codexCompatibility?.ownership.hooksOwner ?? "missing"
+    ],
     ["Hook poll interval", `${codexHooks?.workerPollIntervalSeconds ?? "-"} seconds`],
-    ["Setup rerun safety", ownershipConflicts.length > 0 ? "Blocked by ownership conflict" : "Safe; no overwrite conflict"],
+    [
+      "Setup rerun safety",
+      ownershipConflicts.length > 0
+        ? "Blocked by ownership conflict"
+        : "Safe; no overwrite conflict"
+    ],
     ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],
     ["Codex docs index", codexDocsLabel(codexDocs)],
     ["Compatibility review", codexCompatibility?.status ?? "Not run"],
-    [
-      "Ownership conflicts",
-      ownershipConflicts.length
-        ? ownershipConflicts.join("; ")
-        : "None"
-    ]
+    ["Ownership conflicts", ownershipConflicts.length ? ownershipConflicts.join("; ") : "None"]
   ];
 }
 
-function failedStepSummary(steps: Array<{ label: string; status: string; output: string }> | undefined): string | null {
+function failedStepSummary(
+  steps: Array<{ label: string; status: string; output: string }> | undefined
+): string | null {
   const failed = steps?.find((step) => step.status === "fail");
   return failed ? `${failed.label}: ${failed.output || "failed"}` : null;
 }
@@ -2650,7 +2775,9 @@ function ArtifactTable({ artifacts }: { artifacts: ArtifactSummary[] }) {
           <span title={artifact.path}>{artifact.artifactType}</span>
           <span>{formatBytes(artifact.sizeBytes)}</span>
           <span>{artifact.retentionClass}</span>
-          <span title={artifact.sha256 ?? "No hash"}>{artifact.sha256?.slice(0, 12) ?? "none"}</span>
+          <span title={artifact.sha256 ?? "No hash"}>
+            {artifact.sha256?.slice(0, 12) ?? "none"}
+          </span>
           <a href={artifactDownloadHref(artifact)}>Download</a>
         </div>
       ))}
@@ -2802,7 +2929,9 @@ function capabilityTypeLabel(
   const requiredMissing = typed.filter(
     (capability) => capability.required && capability.status !== "configured"
   ).length;
-  return requiredMissing > 0 ? `${configured}/${typed.length} configured` : `${configured}/${typed.length} ready`;
+  return requiredMissing > 0
+    ? `${configured}/${typed.length} configured`
+    : `${configured}/${typed.length} ready`;
 }
 
 function capabilityCountLabel(
@@ -2859,13 +2988,7 @@ function SettingsGroup({ title, rows }: { title: string; rows: KeyValueRows }) {
   );
 }
 
-function KeyValueList({
-  rows,
-  className = "kv-list"
-}: {
-  rows: KeyValueRows;
-  className?: string;
-}) {
+function KeyValueList({ rows, className = "kv-list" }: { rows: KeyValueRows; className?: string }) {
   return (
     <div className={className}>
       {rows.map(([label, value]) => (
@@ -2885,7 +3008,9 @@ function DefaultLimitsForm({
   settings: PublicSettings | null;
   onSaved: (settings: PublicSettings) => void;
 }) {
-  const [maxExecutionHours, setMaxExecutionHours] = useState(`${settings?.defaultMaxExecutionHours ?? 24}`);
+  const [maxExecutionHours, setMaxExecutionHours] = useState(
+    `${settings?.defaultMaxExecutionHours ?? 24}`
+  );
   const [maxWorkerTurns, setMaxWorkerTurns] = useState(`${settings?.defaultMaxWorkerTurns ?? 200}`);
   const [retryLimit, setRetryLimit] = useState(`${settings?.defaultRetryLimit ?? 1}`);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -2917,15 +3042,33 @@ function DefaultLimitsForm({
     <form className="settings-form" onSubmit={(event) => void submit(event)}>
       <label>
         <span>Default max execution hours</span>
-        <input min="1" max="8760" type="number" value={maxExecutionHours} onChange={(event) => setMaxExecutionHours(event.target.value)} />
+        <input
+          min="1"
+          max="8760"
+          type="number"
+          value={maxExecutionHours}
+          onChange={(event) => setMaxExecutionHours(event.target.value)}
+        />
       </label>
       <label>
         <span>Default max worker turns</span>
-        <input min="1" max="10000" type="number" value={maxWorkerTurns} onChange={(event) => setMaxWorkerTurns(event.target.value)} />
+        <input
+          min="1"
+          max="10000"
+          type="number"
+          value={maxWorkerTurns}
+          onChange={(event) => setMaxWorkerTurns(event.target.value)}
+        />
       </label>
       <label>
         <span>Default retry limit</span>
-        <input min="0" max="10" type="number" value={retryLimit} onChange={(event) => setRetryLimit(event.target.value)} />
+        <input
+          min="0"
+          max="10"
+          type="number"
+          value={retryLimit}
+          onChange={(event) => setRetryLimit(event.target.value)}
+        />
       </label>
       <div className="form-actions">
         <button type="submit" disabled={status === "saving" || !settings}>
@@ -2945,11 +3088,19 @@ function ResourceSettingsForm({
   onSaved: (settings: PublicSettings) => void;
 }) {
   const [minFreeMemoryMb, setMinFreeMemoryMb] = useState(`${settings?.minFreeMemoryMb ?? 2048}`);
-  const [minAvailableMemoryPercent, setMinAvailableMemoryPercent] = useState(`${settings?.minAvailableMemoryPercent ?? 15}`);
+  const [minAvailableMemoryPercent, setMinAvailableMemoryPercent] = useState(
+    `${settings?.minAvailableMemoryPercent ?? 15}`
+  );
   const [minFreeDiskMb, setMinFreeDiskMb] = useState(`${settings?.minFreeDiskMb ?? 10240}`);
-  const [codexTurnTimeoutSeconds, setCodexTurnTimeoutSeconds] = useState(`${settings?.codexTurnTimeoutSeconds ?? 3600}`);
-  const [resourceRecheckIntervalSeconds, setResourceRecheckIntervalSeconds] = useState(`${settings?.resourceRecheckIntervalSeconds ?? 60}`);
-  const [workerPollIntervalSeconds, setWorkerPollIntervalSeconds] = useState(`${settings?.workerPollIntervalSeconds ?? 300}`);
+  const [codexTurnTimeoutSeconds, setCodexTurnTimeoutSeconds] = useState(
+    `${settings?.codexTurnTimeoutSeconds ?? 3600}`
+  );
+  const [resourceRecheckIntervalSeconds, setResourceRecheckIntervalSeconds] = useState(
+    `${settings?.resourceRecheckIntervalSeconds ?? 60}`
+  );
+  const [workerPollIntervalSeconds, setWorkerPollIntervalSeconds] = useState(
+    `${settings?.workerPollIntervalSeconds ?? 300}`
+  );
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -2982,27 +3133,58 @@ function ResourceSettingsForm({
     <form className="settings-form" onSubmit={(event) => void submit(event)}>
       <label>
         <span>Min free memory MB</span>
-        <input min="128" type="number" value={minFreeMemoryMb} onChange={(event) => setMinFreeMemoryMb(event.target.value)} />
+        <input
+          min="128"
+          type="number"
+          value={minFreeMemoryMb}
+          onChange={(event) => setMinFreeMemoryMb(event.target.value)}
+        />
       </label>
       <label>
         <span>Min available memory percent</span>
-        <input min="1" max="100" type="number" value={minAvailableMemoryPercent} onChange={(event) => setMinAvailableMemoryPercent(event.target.value)} />
+        <input
+          min="1"
+          max="100"
+          type="number"
+          value={minAvailableMemoryPercent}
+          onChange={(event) => setMinAvailableMemoryPercent(event.target.value)}
+        />
       </label>
       <label>
         <span>Min free disk MB</span>
-        <input min="1024" type="number" value={minFreeDiskMb} onChange={(event) => setMinFreeDiskMb(event.target.value)} />
+        <input
+          min="1024"
+          type="number"
+          value={minFreeDiskMb}
+          onChange={(event) => setMinFreeDiskMb(event.target.value)}
+        />
       </label>
       <label>
         <span>Codex turn timeout seconds</span>
-        <input min="60" type="number" value={codexTurnTimeoutSeconds} onChange={(event) => setCodexTurnTimeoutSeconds(event.target.value)} />
+        <input
+          min="60"
+          type="number"
+          value={codexTurnTimeoutSeconds}
+          onChange={(event) => setCodexTurnTimeoutSeconds(event.target.value)}
+        />
       </label>
       <label>
         <span>Resource recheck seconds</span>
-        <input min="10" type="number" value={resourceRecheckIntervalSeconds} onChange={(event) => setResourceRecheckIntervalSeconds(event.target.value)} />
+        <input
+          min="10"
+          type="number"
+          value={resourceRecheckIntervalSeconds}
+          onChange={(event) => setResourceRecheckIntervalSeconds(event.target.value)}
+        />
       </label>
       <label>
         <span>Worker poll seconds</span>
-        <input min="30" type="number" value={workerPollIntervalSeconds} onChange={(event) => setWorkerPollIntervalSeconds(event.target.value)} />
+        <input
+          min="30"
+          type="number"
+          value={workerPollIntervalSeconds}
+          onChange={(event) => setWorkerPollIntervalSeconds(event.target.value)}
+        />
       </label>
       <div className="form-actions">
         <button type="submit" disabled={status === "saving" || !settings}>
@@ -3060,26 +3242,53 @@ function SmtpSettingsForm({ onSaved }: { onSaved: (settings: PublicSettings) => 
       </label>
       <label>
         <span>SMTP port</span>
-        <input min="1" max="65535" type="number" value={port} onChange={(event) => setPort(event.target.value)} />
+        <input
+          min="1"
+          max="65535"
+          type="number"
+          value={port}
+          onChange={(event) => setPort(event.target.value)}
+        />
       </label>
       <label>
         <span>Username</span>
-        <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
+        <input
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+        />
       </label>
       <label>
         <span>Password</span>
-        <input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input
+          autoComplete="new-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
       </label>
       <label>
         <span>From email</span>
-        <input type="email" value={fromEmail} onChange={(event) => setFromEmail(event.target.value)} />
+        <input
+          type="email"
+          value={fromEmail}
+          onChange={(event) => setFromEmail(event.target.value)}
+        />
       </label>
       <label>
         <span>Recipient email</span>
-        <input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} />
+        <input
+          type="email"
+          value={recipientEmail}
+          onChange={(event) => setRecipientEmail(event.target.value)}
+        />
       </label>
       <label className="checkbox-label">
-        <input type="checkbox" checked={secure} onChange={(event) => setSecure(event.target.checked)} />
+        <input
+          type="checkbox"
+          checked={secure}
+          onChange={(event) => setSecure(event.target.checked)}
+        />
         <span>Use TLS</span>
       </label>
       <div className="form-actions">
