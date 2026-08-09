@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 import type { GitAutomationService } from "./gitAutomation.js";
+import { planNextWorkerPrompt } from "../supervisor/promptPlanner.js";
 import {
   commitUnitWorkSchema,
   createProjectSchema,
@@ -73,6 +74,19 @@ export function registerProjectRoutes(
         }
         throw error;
       }
+    }
+  );
+
+  server.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/supervisor/next-prompt",
+    async (request, reply) => {
+      const project = await projectService.getProjectDetail(request.params.projectId);
+      if (!project) {
+        return reply.code(404).send({
+          error: "project_not_found"
+        });
+      }
+      return planNextWorkerPrompt(project);
     }
   );
 

@@ -16,6 +16,7 @@ export type CodexRunInput = {
   prompt: string;
   outputSchema?: Record<string, unknown> | undefined;
   executable?: string | undefined;
+  overridePromptLimit?: boolean | undefined;
 };
 
 export type CodexRunnerCommand = {
