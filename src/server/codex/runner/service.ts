@@ -55,6 +55,21 @@ const defaultOutputSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    taskType: {
+      type: "string",
+      enum: [
+        "product_planning",
+        "market_research",
+        "roadmap_creation_audit",
+        "ux_planning",
+        "implementation",
+        "code_review",
+        "verification",
+        "bug_fixing",
+        "screenshot_analysis",
+        "release_readiness_summary"
+      ]
+    },
     summary: { type: "string" },
     changedFiles: {
       type: "array",
@@ -68,9 +83,29 @@ const defaultOutputSchema = {
     nextActions: {
       type: "array",
       items: { type: "string" }
+    },
+    suggestedOptions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          option: { type: "string", enum: ["A", "B", "C", "D", "E", "F", "G"] },
+          prompt: { type: "string" }
+        },
+        required: ["option", "prompt"]
+      }
     }
   },
-  required: ["summary", "changedFiles", "verification", "blockers", "nextActions"]
+  required: [
+    "taskType",
+    "summary",
+    "changedFiles",
+    "verification",
+    "blockers",
+    "nextActions",
+    "suggestedOptions"
+  ]
 } as const;
 
 export class CodexRunnerService {
@@ -336,13 +371,68 @@ export class CodexRunnerService {
     await this.database.pool.query(
       `
         insert into timeline_events (
-          id, project_id, run_id, iteration, event_type, title, body, created_at
+          id, project_id, run_id, iteration, event_type, title, body, metadata, created_at
         )
-        values ($1, $2, $3, $4, 'worker_final_response', 'Worker final response', $5, now())
+        values ($1, $2, $3, $4, 'worker_final_response', 'Worker final response', $5, $6, now())
       `,
-      [randomUUID(), projectId, runId, iteration, finalMessage]
+      [randomUUID(), projectId, runId, iteration, finalMessage, JSON.stringify(parseWorkerContract(finalMessage))]
     );
   }
+}
+
+function parseWorkerContract(finalMessage: string): {
+  suggestedOptions: Array<{ option: string; prompt: string }>;
+  taskType: string | null;
+} {
+  try {
+    const parsed = JSON.parse(finalMessage) as {
+      taskType?: unknown;
+      suggestedOptions?: unknown;
+      nextActions?: unknown;
+    };
+    return {
+      taskType: typeof parsed.taskType === "string" ? parsed.taskType : null,
+      suggestedOptions: normalizeOptions(parsed.suggestedOptions ?? parsed.nextActions)
+    };
+  } catch {
+    return {
+      taskType: null,
+      suggestedOptions: normalizeOptions(finalMessage)
+    };
+  }
+}
+
+function normalizeOptions(value: unknown): Array<{ option: string; prompt: string }> {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => {
+      if (typeof item === "string") {
+        return optionFromText(item);
+      }
+      if (typeof item === "object" && item !== null) {
+        const record = item as { option?: unknown; prompt?: unknown };
+        if (
+          typeof record.option === "string" &&
+          /^[A-G]$/.test(record.option) &&
+          typeof record.prompt === "string"
+        ) {
+          return [{ option: record.option, prompt: record.prompt }];
+        }
+      }
+      return [];
+    });
+  }
+  if (typeof value === "string") {
+    return optionFromText(value);
+  }
+  return [];
+}
+
+function optionFromText(value: string): Array<{ option: string; prompt: string }> {
+  const matches = [...value.matchAll(/^\s*([A-G])[).:\s-]\s*(.+)$/gm)];
+  return matches.map((match) => ({
+    option: match[1]!,
+    prompt: match[2]!.trim()
+  }));
 }
 
 function runProcess(command: CodexRunnerCommand): Promise<{ exitCode: number | null }> {

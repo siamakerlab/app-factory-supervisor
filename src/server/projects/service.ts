@@ -102,6 +102,7 @@ export type TimelineEventSummary = {
   title: string;
   body: string | null;
   artifactId: string | null;
+  metadata: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -187,6 +188,7 @@ type TimelineEventRow = {
   title: string;
   body: string | null;
   artifact_id: string | null;
+  metadata: Record<string, unknown>;
   created_at: Date;
 };
 
@@ -585,7 +587,7 @@ export class ProjectService {
   private async getTimeline(projectId: string): Promise<TimelineEventSummary[]> {
     const result = await this.database.pool.query<TimelineEventRow>(
       `
-        select id, run_id, iteration, event_type, title, body, artifact_id, created_at
+        select id, run_id, iteration, event_type, title, body, artifact_id, metadata, created_at
         from timeline_events
         where project_id = $1
           and event_type in ('supervisor_prompt_sent', 'worker_final_response')
@@ -602,6 +604,7 @@ export class ProjectService {
       title: row.title,
       body: row.body,
       artifactId: row.artifact_id,
+      metadata: row.metadata,
       createdAt: row.created_at.toISOString()
     }));
   }

@@ -288,6 +288,7 @@ type ProjectDetail = ProjectSummary & {
     title: string;
     body: string | null;
     artifactId: string | null;
+    metadata: Record<string, unknown>;
     createdAt: string;
   }>;
   currentSupervisorPrompt: string | null;

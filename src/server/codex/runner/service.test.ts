@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,13 @@ describe("CodexRunnerService", () => {
     expect(command.args).toContain("-C");
     expect(command.args).toContain(projectDir);
     expect(command.jsonlPath).toContain("worker-1");
+    const schema = JSON.parse(await readFile(command.schemaPath, "utf8")) as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toContain("taskType");
+    expect(schema.required).toContain("suggestedOptions");
+    expect(schema.properties.suggestedOptions).toBeTruthy();
   });
 });
 
