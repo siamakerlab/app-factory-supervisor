@@ -1170,6 +1170,7 @@ export function App() {
                 codexDocs,
                 toolchain,
                 capabilities,
+                jobsStatus,
                 buildEnvironmentRows,
                 apiState,
                 testEmailResult,
@@ -1844,6 +1845,7 @@ function renderSettingsTab(
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
   capabilities: CapabilityResponse | null,
+  jobsStatus: JobsStatusResponse | null,
   buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error",
   testEmailResult: string | null,
@@ -1996,17 +1998,32 @@ function renderSettingsTab(
           title="Resource Limits"
           rows={[
             ["CPU limit", settings?.maxCpuUsagePercent ? `${settings.maxCpuUsagePercent}%` : "Unset"],
-            ["Current memory status", "Pending resource monitor"],
+            ["Resource status", jobsStatus?.resourceSnapshot.status ?? "Unavailable"],
+            ["Resource wait reason", jobsStatus?.resourceSnapshot.waitReason ?? "None"],
             [
-              "Free/available memory",
-              `${settings?.minFreeMemoryMb ?? "-"} MB / ${settings?.minAvailableMemoryPercent ?? "-"}%`
+              "Current memory",
+              jobsStatus
+                ? `${jobsStatus.resourceSnapshot.memory.availableMb} MB available (${jobsStatus.resourceSnapshot.memory.availablePercent}%)`
+                : "Unavailable"
+            ],
+            [
+              "Required memory",
+              `${settings?.minFreeMemoryMb ?? "-"} MB free / ${settings?.minAvailableMemoryPercent ?? "-"}% available`
+            ],
+            [
+              "Current disk",
+              jobsStatus ? `${jobsStatus.resourceSnapshot.disk.freeMb} MB free` : "Unavailable"
             ],
             ["Free disk threshold", `${settings?.minFreeDiskMb ?? "-"} MB`],
+            [
+              "Current load",
+              jobsStatus ? `${Math.round(jobsStatus.resourceSnapshot.load.oneMinute * 100) / 100}` : "Unavailable"
+            ],
             ["Recheck interval", `${settings?.resourceRecheckIntervalSeconds ?? "-"} seconds`],
             ["Worker timeout", `${settings?.codexTurnTimeoutSeconds ?? "-"} seconds`],
             ["Stale heartbeat", `${settings?.staleHeartbeatSeconds ?? "-"} seconds`],
-            ["Artifact retention", "Pending artifact phase"],
-            ["Export retention", "Pending export phase"]
+            ["Artifact retention", "Recorded by retention class and artifact metadata"],
+            ["Export retention", `Expires per export record; timeout ${settings?.exportTimeoutSeconds ?? "-"} seconds`]
           ]}
         />
       );

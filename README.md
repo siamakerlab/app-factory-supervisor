@@ -192,7 +192,7 @@ project workspaces.
 
 ## Git Automation
 
-The app is planned to manage Git automatically:
+The app manages Git automation policy for worker-driven projects:
 
 - Commit after every completed unit of work with file changes.
 - Use English commit messages.
@@ -214,7 +214,7 @@ Codex sessions run with `--yolo`, which bypasses normal approval and sandbox pro
 
 Use this app only inside an isolated environment. The worker should only have access to the selected project workspace and explicitly allowed build/cache paths. App secrets, SMTP credentials, PostgreSQL data, Codex auth files, and global secret storage must not be mounted writable into worker workspaces.
 
-Additional planned safeguards:
+Implemented and documented safeguards include:
 
 - explicit environment allowlist
 - sensitive path denylist

@@ -26,10 +26,9 @@ Environment verification action.
 - Configuration Reference: `https://developers.openai.com/codex/config-reference`
 - Hooks and Stop lifecycle callbacks: `https://developers.openai.com/codex/hooks`
 
-## Remaining Follow-Up
+## Operator Follow-Up
 
-- Phase 10 indexes official Codex documentation through `docs-mcp-server` and links the latest
-  ready `openai-codex` index to compatibility reviews.
-- Later runner phases will attach project-specific supervisor and worker output schemas.
-- MCP-required support remains intentionally false until the MCP installation wizard phase verifies
-  required servers.
+- Re-run the compatibility review after upgrading Codex or changing app-managed config.
+- Re-run the Codex documentation index after major Codex documentation or CLI changes.
+- Treat failed config validation, hook ownership conflicts, or missing Codex auth as automation
+  blockers until fixed.
