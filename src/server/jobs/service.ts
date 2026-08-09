@@ -87,7 +87,7 @@ type JobRow = {
   error_summary: string | null;
 };
 
-type SettingsRow = {
+export type JobResourceSettings = {
   min_free_memory_mb: number;
   min_available_memory_percent: number;
   min_free_disk_mb: number;
@@ -100,6 +100,21 @@ type SettingsRow = {
   test_timeout_seconds: number;
   export_timeout_seconds: number;
   emulator_timeout_seconds: number;
+};
+
+type SettingsRow = JobResourceSettings;
+
+export type ResourceReadings = {
+  memory: {
+    totalMb: number;
+    freeMb: number;
+    availableMb: number;
+  };
+  disk: {
+    freeMb: number;
+  };
+  cpuUsagePercent: number | null;
+  oneMinuteLoad: number;
 };
 
 export class JobService {
@@ -328,50 +343,15 @@ export class JobService {
   private async readResourceSnapshot(settings: SettingsRow): Promise<ResourceSnapshot> {
     const memory = await readMemoryMb();
     const disk = await readDiskFreeMb(this.projectsDir);
-    const oneMinuteLoad = loadavg()[0] ?? 0;
-    const cpuUsagePercent = null;
-    const waits: string[] = [];
-    const availablePercent = Math.floor((memory.availableMb / Math.max(memory.totalMb, 1)) * 100);
-    if (memory.freeMb < settings.min_free_memory_mb) {
-      waits.push(`free memory ${memory.freeMb}MB below ${settings.min_free_memory_mb}MB`);
-    }
-    if (availablePercent < settings.min_available_memory_percent) {
-      waits.push(`available memory ${availablePercent}% below ${settings.min_available_memory_percent}%`);
-    }
-    if (disk.freeMb < settings.min_free_disk_mb) {
-      waits.push(`free disk ${disk.freeMb}MB below ${settings.min_free_disk_mb}MB`);
-    }
-    if (settings.max_load_average !== null && oneMinuteLoad > Number(settings.max_load_average)) {
-      waits.push(`load average ${oneMinuteLoad.toFixed(2)} above ${settings.max_load_average}`);
-    }
-    return {
-      status: waits.length > 0 ? "wait" : "pass",
-      waitReason: waits.length > 0 ? waits.join("; ") : null,
-      memory: {
-        totalMb: memory.totalMb,
-        freeMb: memory.freeMb,
-        availableMb: memory.availableMb,
-        availablePercent,
-        requiredFreeMb: settings.min_free_memory_mb,
-        requiredAvailablePercent: settings.min_available_memory_percent
+    return evaluateResourceSnapshot(
+      {
+        memory,
+        disk,
+        cpuUsagePercent: null,
+        oneMinuteLoad: loadavg()[0] ?? 0
       },
-      disk: {
-        freeMb: disk.freeMb,
-        requiredFreeMb: settings.min_free_disk_mb
-      },
-      cpu: {
-        usagePercent: cpuUsagePercent,
-        maxUsagePercent: settings.max_cpu_usage_percent
-      },
-      load: {
-        oneMinute: oneMinuteLoad,
-        maxLoadAverage: settings.max_load_average === null ? null : Number(settings.max_load_average)
-      },
-      nextCheckAt:
-        waits.length > 0
-          ? new Date(Date.now() + settings.resource_recheck_interval_seconds * 1000).toISOString()
-          : null
-    };
+      settings
+    );
   }
 
   private async recordResourceChecks(
@@ -425,7 +405,71 @@ export class JobService {
   }
 }
 
-function timeoutSeconds(jobType: JobType, settings: SettingsRow): number {
+export function evaluateResourceSnapshot(
+  readings: ResourceReadings,
+  settings: JobResourceSettings,
+  now = new Date()
+): ResourceSnapshot {
+  const waits: string[] = [];
+  const availablePercent = Math.floor(
+    (readings.memory.availableMb / Math.max(readings.memory.totalMb, 1)) * 100
+  );
+  const maxLoadAverage =
+    settings.max_load_average === null ? null : Number(settings.max_load_average);
+  if (readings.memory.freeMb < settings.min_free_memory_mb) {
+    waits.push(`free memory ${readings.memory.freeMb}MB below ${settings.min_free_memory_mb}MB`);
+  }
+  if (availablePercent < settings.min_available_memory_percent) {
+    waits.push(
+      `available memory ${availablePercent}% below ${settings.min_available_memory_percent}%`
+    );
+  }
+  if (readings.disk.freeMb < settings.min_free_disk_mb) {
+    waits.push(`free disk ${readings.disk.freeMb}MB below ${settings.min_free_disk_mb}MB`);
+  }
+  if (
+    readings.cpuUsagePercent !== null &&
+    settings.max_cpu_usage_percent !== null &&
+    readings.cpuUsagePercent > settings.max_cpu_usage_percent
+  ) {
+    waits.push(
+      `CPU usage ${readings.cpuUsagePercent}% above ${settings.max_cpu_usage_percent}%`
+    );
+  }
+  if (maxLoadAverage !== null && readings.oneMinuteLoad > maxLoadAverage) {
+    waits.push(`load average ${readings.oneMinuteLoad.toFixed(2)} above ${maxLoadAverage}`);
+  }
+  return {
+    status: waits.length > 0 ? "wait" : "pass",
+    waitReason: waits.length > 0 ? waits.join("; ") : null,
+    memory: {
+      totalMb: readings.memory.totalMb,
+      freeMb: readings.memory.freeMb,
+      availableMb: readings.memory.availableMb,
+      availablePercent,
+      requiredFreeMb: settings.min_free_memory_mb,
+      requiredAvailablePercent: settings.min_available_memory_percent
+    },
+    disk: {
+      freeMb: readings.disk.freeMb,
+      requiredFreeMb: settings.min_free_disk_mb
+    },
+    cpu: {
+      usagePercent: readings.cpuUsagePercent,
+      maxUsagePercent: settings.max_cpu_usage_percent
+    },
+    load: {
+      oneMinute: readings.oneMinuteLoad,
+      maxLoadAverage
+    },
+    nextCheckAt:
+      waits.length > 0
+        ? new Date(now.getTime() + settings.resource_recheck_interval_seconds * 1000).toISOString()
+        : null
+  };
+}
+
+export function timeoutSeconds(jobType: JobType, settings: JobResourceSettings): number {
   if (jobType === "project_export") {
     return settings.export_timeout_seconds;
   }

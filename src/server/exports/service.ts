@@ -311,7 +311,7 @@ function safeName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project";
 }
 
-function assertInsideRoot(path: string, root: string, errorMessage: string): void {
+export function assertInsideRoot(path: string, root: string, errorMessage: string): void {
   const absolutePath = resolve(path);
   const absoluteRoot = resolve(root);
   const relativePath = relative(absoluteRoot, absolutePath);
