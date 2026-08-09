@@ -1,5 +1,10 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
@@ -50,6 +55,24 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
 
   if (dependencies.settingsService) {
     registerSettingsRoutes(server, dependencies.settingsService);
+  }
+
+  const webDistDir = resolve(config.WEB_DIST_DIR);
+  if (existsSync(webDistDir)) {
+    await server.register(fastifyStatic, {
+      root: webDistDir,
+      prefix: "/"
+    });
+
+    server.setNotFoundHandler(async (request, reply) => {
+      if (request.method === "GET" && !request.url.startsWith("/api/")) {
+        return reply.type("text/html").send(await readFile(join(webDistDir, "index.html")));
+      }
+
+      return reply.code(404).send({
+        error: "not_found"
+      });
+    });
   }
 
   return server;
