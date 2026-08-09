@@ -2,13 +2,21 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
+import type { SettingsService } from "./settings/service.js";
+import { registerSettingsRoutes } from "./settings/routes.js";
 
 export type ReadinessState = {
   migrated: boolean;
 };
 
-export async function buildServer(readiness: ReadinessState = { migrated: false }) {
+export type ServerDependencies = {
+  readiness?: ReadinessState;
+  settingsService?: SettingsService;
+};
+
+export async function buildServer(dependencies: ServerDependencies = {}) {
   const config = loadConfig();
+  const readiness = dependencies.readiness ?? { migrated: false };
   const server = Fastify({
     logger: {
       level: config.NODE_ENV === "development" ? "debug" : "info"
@@ -29,6 +37,10 @@ export async function buildServer(readiness: ReadinessState = { migrated: false 
       }
     });
   });
+
+  if (dependencies.settingsService) {
+    registerSettingsRoutes(server, dependencies.settingsService);
+  }
 
   return server;
 }

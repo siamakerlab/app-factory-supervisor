@@ -421,6 +421,27 @@ insert into app_settings (id, created_at, updated_at)
 values (true, now(), now())
 on conflict (id) do nothing;
 `
+  },
+  {
+    id: "0002_settings_audit",
+    description: "Add settings retry default and app audit events",
+    sql: `
+alter table app_settings
+  add column if not exists default_retry_limit integer not null default 1;
+
+create table if not exists app_audit_events (
+  id uuid primary key,
+  event_type text not null,
+  actor_type text not null,
+  actor_id text,
+  ip_address inet,
+  summary text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null
+);
+
+create index if not exists idx_app_audit_events_type_created on app_audit_events(event_type, created_at);
+`
   }
 ];
 

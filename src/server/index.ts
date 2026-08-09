@@ -3,13 +3,18 @@ import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
 import { ensureRuntimeDirectories, getRuntimePaths } from "./runtime/paths.js";
+import { SettingsService } from "./settings/service.js";
 
 const config = loadConfig();
 const database = createDatabase(config);
 const readiness = {
   migrated: false
 };
-const server = await buildServer(readiness);
+const settingsService = new SettingsService(database);
+const server = await buildServer({
+  readiness,
+  settingsService
+});
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);
