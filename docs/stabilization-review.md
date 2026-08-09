@@ -17,6 +17,8 @@ for long-running Android/Kotlin projects.
 - Password failure/fail2ban log format: `src/server/auth/service.test.ts`
 - Terminal status evidence guard: `src/server/stabilization/simulations.test.ts` and
   `src/server/supervisor/completionGate.test.ts`
+- Job runner evidence guard: jobs without explicit handlers fail or retry instead of being marked
+  succeeded without execution evidence.
 
 ## Operator-Visible Areas Reviewed
 

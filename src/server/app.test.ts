@@ -45,6 +45,22 @@ describe("server health", () => {
       }
     });
   });
+
+  it("sets baseline browser security headers", async () => {
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      }
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/health"
+    });
+
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["x-frame-options"]).toBe("DENY");
+    expect(response.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+  });
 });
 
 describe("auth/session integration", () => {
@@ -97,6 +113,32 @@ describe("auth/session integration", () => {
     expect(session.statusCode).toBe(200);
     expect(session.json()).toEqual({
       user: sessionUser
+    });
+  });
+
+  it("rejects cross-origin unsafe API requests", async () => {
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      headers: {
+        origin: "https://example.invalid",
+        host: "localhost:3000"
+      },
+      payload: {
+        adminId: "admin",
+        password: "correct horse battery staple"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "csrf_origin_rejected"
     });
   });
 });

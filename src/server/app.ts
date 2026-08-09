@@ -37,6 +37,43 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
     origin: false
   });
   await server.register(cookie);
+  server.addHook("onRequest", async (request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "no-referrer");
+    reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
+    reply.header(
+      "content-security-policy",
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'self'"
+      ].join("; ")
+    );
+    if (request.url.startsWith("/api/")) {
+      reply.header("cache-control", "no-store");
+    }
+  });
+  server.addHook("preHandler", async (request, reply) => {
+    if (!request.url.startsWith("/api/") || !unsafeHttpMethods.has(request.method)) {
+      return;
+    }
+    const origin = request.headers.origin ?? originFromReferer(request.headers.referer);
+    if (!origin) {
+      return;
+    }
+    if (!allowedRequestOrigins(request.headers.host).has(origin)) {
+      return reply.code(403).send({
+        error: "csrf_origin_rejected"
+      });
+    }
+  });
 
   server.get("/health", (_request, reply) => {
     const statusCode = readiness.migrated ? 200 : 503;
@@ -76,4 +113,24 @@ export async function buildServer(dependencies: ServerDependencies = {}) {
   }
 
   return server;
+}
+
+const unsafeHttpMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function originFromReferer(referer: string | undefined): string | null {
+  if (!referer) {
+    return null;
+  }
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return null;
+  }
+}
+
+function allowedRequestOrigins(host: string | undefined): Set<string> {
+  if (!host) {
+    return new Set();
+  }
+  return new Set([`http://${host}`, `https://${host}`]);
 }

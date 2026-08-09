@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateResourceSnapshot,
+  failedJobStatus,
   timeoutSeconds,
   type JobResourceSettings,
   type ResourceReadings
@@ -55,6 +56,12 @@ describe("job resource policy", () => {
     expect(timeoutSeconds("verification", policy)).toBe(1800);
     expect(timeoutSeconds("project_export", policy)).toBe(1200);
     expect(timeoutSeconds("setup", policy)).toBe(900);
+  });
+
+  it("requeues failed jobs only while attempts remain", () => {
+    expect(failedJobStatus(1, 3)).toBe("queued");
+    expect(failedJobStatus(2, 3)).toBe("queued");
+    expect(failedJobStatus(3, 3)).toBe("failed");
   });
 });
 

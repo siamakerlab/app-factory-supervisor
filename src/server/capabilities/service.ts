@@ -357,7 +357,7 @@ export class CapabilityService {
         await writeFile(manifestPath, renderCapabilityManifest(capability), "utf8");
       }
     }
-    return `Prepared ${bundled.length} bundled skill/agent placeholders without overwriting existing files.`;
+    return `Prepared ${bundled.length} bundled skill/agent manifests without overwriting existing files.`;
   }
 
   private async writeCodexConfig(paths: ReturnType<CapabilityService["getPaths"]>): Promise<string> {
@@ -705,7 +705,7 @@ function renderCapabilityManifest(capability: CapabilityDefinition): string {
     "",
     "Product-owned worker skill for Android/Kotlin implementation and review.",
     "",
-    "This placeholder is created by first-run capability wiring when the image does not provide a fuller bundled copy."
+    "This manifest is created by first-run capability wiring when the image does not provide a fuller bundled copy."
   ].join("\n");
 }
 

@@ -67,6 +67,14 @@ export type JobSummary = {
   errorSummary: string | null;
 };
 
+export type JobHandlerResult = {
+  summary: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type JobHandler = (job: JobSummary) => Promise<JobHandlerResult>;
+export type JobHandlers = Partial<Record<JobType, JobHandler>>;
+
 type JobRow = {
   id: string;
   project_id: string;
@@ -122,7 +130,8 @@ export class JobService {
 
   constructor(
     private readonly database: Database,
-    private readonly projectsDir: string
+    private readonly projectsDir: string,
+    private readonly handlers: JobHandlers = {}
   ) {}
 
   async enqueue(input: {
@@ -184,9 +193,20 @@ export class JobService {
       if (!locked) {
         continue;
       }
-      await this.startAndCompletePlaceholderJob(job, settings);
-      await this.releaseProjectLock(job.projectId, job.id);
-      handledJobs.push((await this.getJob(job.id))!);
+      try {
+        await this.startJob(job, settings);
+        const handler = this.handlers[job.jobType];
+        if (!handler) {
+          throw new Error(`job_handler_not_configured:${job.jobType}`);
+        }
+        const result = await handler(job);
+        await this.completeJob(job, result);
+      } catch (error) {
+        await this.failJob(job, error);
+      } finally {
+        await this.releaseProjectLock(job.projectId, job.id);
+        handledJobs.push((await this.getJob(job.id))!);
+      }
     }
     return {
       resourceSnapshot: snapshot,
@@ -212,7 +232,7 @@ export class JobService {
     return result.rowCount ?? 0;
   }
 
-  private async startAndCompletePlaceholderJob(job: JobSummary, settings: SettingsRow): Promise<void> {
+  private async startJob(job: JobSummary, settings: SettingsRow): Promise<void> {
     const now = Date.now();
     await this.database.pool.query(
       `
@@ -235,6 +255,9 @@ export class JobService {
         new Date(now + settings.stale_heartbeat_seconds * 1000)
       ]
     );
+  }
+
+  private async completeJob(job: JobSummary, result: JobHandlerResult): Promise<void> {
     await this.database.pool.query(
       `
         insert into process_heartbeats (
@@ -248,7 +271,10 @@ export class JobService {
         job.jobType,
         process.pid,
         this.runnerId,
-        JSON.stringify({ placeholderRunner: true })
+        JSON.stringify({
+          summary: result.summary,
+          ...(result.metadata ?? {})
+        })
       ]
     );
     await this.database.pool.query(
@@ -256,10 +282,48 @@ export class JobService {
         update jobs
         set status = 'succeeded',
             heartbeat_at = now(),
-            finished_at = now()
+            finished_at = now(),
+            error_summary = null
         where id = $1
       `,
       [job.id]
+    );
+  }
+
+  private async failJob(job: JobSummary, error: unknown): Promise<void> {
+    const nextAttempts = job.attempts + 1;
+    const status = failedJobStatus(nextAttempts, job.maxAttempts);
+    const errorSummary = error instanceof Error ? error.message.slice(0, 2000) : "unknown job error";
+    await this.database.pool.query(
+      `
+        insert into process_heartbeats (
+          id, job_id, process_kind, pid, host_id, status, last_seen_at, metadata
+        )
+        values ($1, $2, $3, $4, $5, 'failed', now(), $6)
+      `,
+      [
+        randomUUID(),
+        job.id,
+        job.jobType,
+        process.pid,
+        this.runnerId,
+        JSON.stringify({ errorSummary })
+      ]
+    );
+    await this.database.pool.query(
+      `
+        update jobs
+        set status = $2,
+            heartbeat_at = now(),
+            finished_at = case when $2 = 'failed' then now() else null end,
+            locked_by = null,
+            locked_at = null,
+            timeout_at = null,
+            stale_after = null,
+            error_summary = $3
+        where id = $1
+      `,
+      [job.id, status, errorSummary]
     );
   }
 
@@ -480,6 +544,10 @@ export function timeoutSeconds(jobType: JobType, settings: JobResourceSettings):
     return settings.codex_turn_timeout_seconds;
   }
   return settings.build_timeout_seconds;
+}
+
+export function failedJobStatus(attemptsAfterFailure: number, maxAttempts: number): JobStatus {
+  return attemptsAfterFailure < maxAttempts ? "queued" : "failed";
 }
 
 async function readMemoryMb() {
