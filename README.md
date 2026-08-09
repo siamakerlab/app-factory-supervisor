@@ -53,7 +53,8 @@ The app stores only structured state, prompt history, worker final responses, su
 
 ## Installation
 
-The implementation is still being built, so these commands describe the intended deployment flow.
+The implementation is still being built, but the MVP deployment target is a single Docker Compose
+stack with the web app and PostgreSQL.
 
 Clone the repository:
 
@@ -68,8 +69,6 @@ Start the stack:
 docker compose up -d
 ```
 
-Open the web app and complete the first-run wizard.
-
 By default the app is published on host port `3090`:
 
 ```text
@@ -77,6 +76,30 @@ http://localhost:3090
 ```
 
 Set `APP_PUBLISHED_PORT` before running Compose if that port is already in use.
+
+Check service health:
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+Open the web app and complete the first-run wizard.
+
+## First-Run Setup
+
+The first-run wizard must be completed before project automation is available:
+
+1. Create the single admin account.
+2. Run the deployment environment installer and review the Build Environment results.
+3. Copy the generated SSH public key into the Git host account that owns project repositories.
+
+The deployment installer verifies or installs Android/Kotlin development prerequisites, Codex
+compatibility, required MCP servers, bundled skills, bundled agents, generated schemas, managed hook
+configuration, and app-managed Codex config sections.
+
+The Git setup step requires Git `user.name` and Git `user.email` so worker commits can be attributed
+correctly. Managed commits use English commit messages.
 
 For local scaffold development:
 
@@ -137,6 +160,35 @@ The project screen should show:
 - artifacts
 - full project ZIP export
 - direct instruction input for the supervisor
+
+To export a project, open the project screen and request a full project ZIP. The export includes the
+project folder, ignored files, and `keystores/` when present. Treat every export as sensitive because
+it may contain signing material or app credentials.
+
+## Backup And Restore
+
+Back up all three Compose volumes together while the stack is stopped or quiescent:
+
+```bash
+docker compose stop app
+docker compose exec postgres pg_dump -U app_factory app_factory_supervisor > backup.sql
+docker run --rm -v app-factory-supervisor_app_data:/data -v "$PWD:/backup" alpine tar czf /backup/app-data.tgz -C /data .
+docker run --rm -v app-factory-supervisor_app_projects:/projects -v "$PWD:/backup" alpine tar czf /backup/app-projects.tgz -C /projects .
+docker compose start app
+```
+
+Restore PostgreSQL, `app_data`, and `app_projects` as one consistent set. Do not restore only the
+database without filesystem artifacts, because artifact records point at files under app data and
+project workspaces.
+
+## More Documentation
+
+- [Operations Runbook](docs/operations.md)
+- [Administrator Guide](docs/admin.md)
+- [Architecture Notes](docs/architecture.md)
+- [Developer Guide](docs/developer.md)
+- [Security Notes](docs/security.md)
+- [License Policy](docs/license-policy.md)
 
 ## Git Automation
 
