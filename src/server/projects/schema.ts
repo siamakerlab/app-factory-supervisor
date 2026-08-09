@@ -31,3 +31,8 @@ export const pushPhaseSchema = z.object({
   phase: z.string().trim().min(2).max(120),
   summary: z.string().trim().max(1000).optional()
 });
+
+export const updateChecklistItemSchema = z.object({
+  status: z.enum(["needed", "provided", "pass", "failed", "blocked"]),
+  lastValidation: z.string().trim().max(1000).optional()
+});

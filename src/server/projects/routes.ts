@@ -2,7 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 import type { GitAutomationService } from "./gitAutomation.js";
-import { commitUnitWorkSchema, createProjectSchema, pushPhaseSchema } from "./schema.js";
+import {
+  commitUnitWorkSchema,
+  createProjectSchema,
+  pushPhaseSchema,
+  updateChecklistItemSchema
+} from "./schema.js";
 import type { ProjectService } from "./service.js";
 
 export function registerProjectRoutes(
@@ -39,6 +44,34 @@ export function registerProjectRoutes(
         });
       }
       return project;
+    }
+  );
+
+  server.put<{ Params: { projectId: string; itemKey: string } }>(
+    "/api/projects/:projectId/checklist/:itemKey",
+    async (request, reply) => {
+      try {
+        const body = updateChecklistItemSchema.parse(request.body);
+        const project = await projectService.updateChecklistItem(
+          request.params.projectId,
+          request.params.itemKey,
+          body
+        );
+        if (!project) {
+          return reply.code(404).send({
+            error: "checklist_item_not_found"
+          });
+        }
+        return project;
+      } catch (error) {
+        if (error instanceof ZodError) {
+          return reply.code(400).send({
+            error: "invalid_checklist_item",
+            issues: error.issues
+          });
+        }
+        throw error;
+      }
     }
   );
 

@@ -509,6 +509,7 @@ export function App() {
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
+  const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -611,6 +612,38 @@ export function App() {
       return;
     }
     setProjectDetail((await response.json()) as ProjectDetail);
+  }
+
+  async function updateChecklistItem(
+    projectId: string,
+    itemKey: string,
+    status: ProjectDetail["userRequiredItems"][number]["status"]
+  ) {
+    setChecklistBusyKey(itemKey);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/checklist/${itemKey}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          status,
+          lastValidation:
+            status === "provided" || status === "pass"
+              ? "Marked by user in web checklist."
+              : undefined
+        })
+      });
+      if (!response.ok) {
+        setApiState("error");
+        return;
+      }
+      setProjectDetail((await response.json()) as ProjectDetail);
+      await loadApiState();
+    } finally {
+      setChecklistBusyKey(null);
+    }
   }
 
   async function runCodexCompatibilityReview() {
@@ -875,6 +908,10 @@ export function App() {
                 project={projectDetail}
                 exportBusy={exportBusyProjectId === projectDetail.id}
                 onExport={() => void requestProjectExport(projectDetail.id)}
+                checklistBusyKey={checklistBusyKey}
+                onChecklistUpdate={(itemKey, status) =>
+                  void updateChecklistItem(projectDetail.id, itemKey, status)
+                }
               />
             ) : (
               <p className="muted-copy">Select a project to inspect progress, timeline, and artifacts.</p>
@@ -1119,11 +1156,18 @@ function StepHeader({
 function ProjectDetailPanel({
   project,
   exportBusy,
-  onExport
+  onExport,
+  checklistBusyKey,
+  onChecklistUpdate
 }: {
   project: ProjectDetail;
   exportBusy: boolean;
   onExport: () => void;
+  checklistBusyKey: string | null;
+  onChecklistUpdate: (
+    itemKey: string,
+    status: ProjectDetail["userRequiredItems"][number]["status"]
+  ) => void;
 }) {
   const latestWorker = project.latestWorkerResponse ?? "No worker response yet.";
   return (
@@ -1212,8 +1256,30 @@ function ProjectDetailPanel({
             {project.userRequiredItems.slice(0, 10).map((item) => (
               <div className="mini-row" key={item.key}>
                 <span>{item.label}</span>
-                <span>{item.secret ? "secret" : item.status}</span>
-                <span>{item.canContinueWithoutIt ? "can continue" : "required"}</span>
+                <span>{item.secret ? `secret/${item.status}` : item.status}</span>
+                <span>
+                  <button
+                    type="button"
+                    disabled={checklistBusyKey === item.key}
+                    onClick={() => onChecklistUpdate(item.key, "pass")}
+                  >
+                    Pass
+                  </button>
+                  <button
+                    type="button"
+                    disabled={checklistBusyKey === item.key}
+                    onClick={() => onChecklistUpdate(item.key, "needed")}
+                  >
+                    Need
+                  </button>
+                  <button
+                    type="button"
+                    disabled={checklistBusyKey === item.key}
+                    onClick={() => onChecklistUpdate(item.key, "blocked")}
+                  >
+                    Block
+                  </button>
+                </span>
               </div>
             ))}
           </div>

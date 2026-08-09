@@ -8,6 +8,7 @@ import type { AppConfig } from "../config.js";
 import type { Database } from "../db/client.js";
 import { getRuntimePaths } from "../runtime/paths.js";
 import type { CreateProjectInput } from "./schema.js";
+import { updateChecklistItemSchema } from "./schema.js";
 
 type ProjectStatus =
   | "running"
@@ -189,6 +190,7 @@ type VerificationRow = {
 };
 
 type UserRequiredItemRow = {
+  id?: string;
   item_key: string;
   label: string;
   status: UserRequiredItemSummary["status"];
@@ -196,6 +198,7 @@ type UserRequiredItemRow = {
   can_continue_without_it: boolean;
   secret: boolean;
   last_validation: string | null;
+  secret_id?: string | null;
   updated_at: Date;
 };
 
@@ -436,6 +439,35 @@ export class ProjectService {
     };
   }
 
+  async updateChecklistItem(
+    projectId: string,
+    itemKey: string,
+    input: unknown
+  ): Promise<ProjectDetail | null> {
+    const patch = updateChecklistItemSchema.parse(input);
+    const existing = await this.getChecklistItem(projectId, itemKey);
+    if (!existing) {
+      return null;
+    }
+    let secretId = existing.secret_id ?? null;
+    if (existing.secret && ["provided", "pass"].includes(patch.status) && !secretId) {
+      secretId = await this.createChecklistSecretMarker(projectId, itemKey);
+    }
+    await this.database.pool.query(
+      `
+        update user_required_items
+        set status = $3,
+            secret_id = $4,
+            last_validation = $5,
+            updated_at = now()
+        where project_id = $1 and item_key = $2
+      `,
+      [projectId, itemKey, patch.status, secretId, patch.lastValidation ?? null]
+    );
+    await this.applyChecklistProjectStatus(projectId);
+    return this.getProjectDetail(projectId);
+  }
+
   private async getProject(id: string): Promise<ProjectSummary | null> {
     const result = await this.database.pool.query<ProjectRow>(
       `
@@ -550,6 +582,77 @@ export class ProjectService {
       lastValidation: row.last_validation,
       updatedAt: row.updated_at.toISOString()
     }));
+  }
+
+  private async getChecklistItem(
+    projectId: string,
+    itemKey: string
+  ): Promise<UserRequiredItemRow | null> {
+    const result = await this.database.pool.query<UserRequiredItemRow>(
+      `
+        select id, item_key, label, status, required_for_production, can_continue_without_it,
+          secret, secret_id, last_validation, updated_at
+        from user_required_items
+        where project_id = $1 and item_key = $2
+      `,
+      [projectId, itemKey]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async createChecklistSecretMarker(projectId: string, itemKey: string): Promise<string> {
+    const secretDir = join(this.config.APP_DATA_DIR, "secrets", "project-checklist", projectId);
+    await mkdir(secretDir, { recursive: true, mode: 0o700 });
+    const storagePath = join(secretDir, `${slugify(itemKey)}.json`);
+    await writeFile(
+      storagePath,
+      JSON.stringify(
+        {
+          projectId,
+          itemKey,
+          note: "Secret value is user-managed and intentionally not stored in prompts, JSONL, logs, or email."
+        },
+        null,
+        2
+      ),
+      { encoding: "utf8", mode: 0o600 }
+    );
+    const secretId = randomUUID();
+    await this.database.pool.query(
+      `
+        insert into secrets (id, secret_type, storage_path, description, created_at, updated_at)
+        values ($1, 'project_checklist_secret_marker', $2, $3, now(), now())
+      `,
+      [secretId, storagePath, `Secret marker for ${itemKey}`]
+    );
+    return secretId;
+  }
+
+  private async applyChecklistProjectStatus(projectId: string): Promise<void> {
+    const result = await this.database.pool.query<{ count: string }>(
+      `
+        select count(*) as count
+        from user_required_items
+        where project_id = $1
+          and required_for_production = true
+          and can_continue_without_it = false
+          and status in ('failed', 'blocked')
+      `,
+      [projectId]
+    );
+    const blocked = Number(result.rows[0]?.count ?? 0) > 0;
+    await this.database.pool.query(
+      `
+        update projects
+        set status = case
+              when $2 = true then 'blocked_needs_user'
+              else status
+            end,
+            updated_at = now()
+        where id = $1
+      `,
+      [projectId, blocked]
+    );
   }
 
   private async getRecentArtifacts(projectId: string): Promise<ProjectArtifactSummary[]> {
