@@ -29,6 +29,9 @@ export type CodexCompatibilityReview = {
   stopHookCallbackVerified: boolean;
   jsonlParserRecognizesCurrentEvents: boolean;
   mcpRequiredSupported: boolean;
+  codexDocsIndexed: boolean;
+  codexDocIndexId: string | null;
+  codexDocIndexStatus: "not_started" | "indexing" | "ready" | "failed";
   buildEnvironmentReady: boolean;
   gapSummary: string;
   artifactPath: string | null;
@@ -78,6 +81,14 @@ type ReviewRow = {
 };
 
 type ReviewMetadata = Omit<CodexCompatibilityReview, "id">;
+
+type LatestDocIndexRow = {
+  id: string;
+  status: "not_started" | "indexing" | "ready" | "failed";
+  metadata: {
+    gapReport?: string;
+  };
+};
 
 export class CodexCompatibilityService {
   constructor(
@@ -152,6 +163,7 @@ export class CodexCompatibilityService {
       source: "compatibility_review",
       createdAt: reviewStartedAt.toISOString()
     });
+    const latestDocIndex = await this.getLatestCodexDocIndex();
     const jsonlSummary = summarizeCodexJsonl(smoke.stdout);
 
     const flags = {
@@ -167,7 +179,10 @@ export class CodexCompatibilityService {
       stopHookCallbackVerified,
       jsonlParserRecognizesCurrentEvents:
         parserRecognizesRequiredCodexEvents() && jsonlSummary.requiredEventsRecognized,
-      mcpRequiredSupported: false
+      mcpRequiredSupported: false,
+      codexDocsIndexed: latestDocIndex?.status === "ready",
+      codexDocIndexId: latestDocIndex?.status === "ready" ? latestDocIndex.id : null,
+      codexDocIndexStatus: latestDocIndex?.status ?? "not_started"
     };
 
     const buildEnvironmentReady =
@@ -181,7 +196,8 @@ export class CodexCompatibilityService {
       flags.appServerJsonSchemasGenerated &&
       flags.configValidationPassed &&
       flags.stopHookCallbackVerified &&
-      flags.jsonlParserRecognizesCurrentEvents;
+      flags.jsonlParserRecognizesCurrentEvents &&
+      flags.codexDocsIndexed;
 
     const generatedSchemaPaths = {
       typeScript: flags.appServerTypeScriptSchemasGenerated ? schemaResult.typeScriptPath : null,
@@ -201,7 +217,9 @@ export class CodexCompatibilityService {
       schemaTypeScriptError: schemaResult.typeScript.stderr || schemaResult.typeScript.error,
       schemaJsonError: schemaResult.jsonSchema.stderr || schemaResult.jsonSchema.error,
       configError: configValidation.stderr || configValidation.error,
-      ownershipConflicts: ownership.conflicts
+      ownershipConflicts: ownership.conflicts,
+      codexDocsIndexed: flags.codexDocsIndexed,
+      codexDocsGapReport: latestDocIndex?.metadata.gapReport ?? null
     });
 
     const metadata: ReviewMetadata = {
@@ -256,10 +274,11 @@ export class CodexCompatibilityService {
           mcp_required_supported,
           gap_summary,
           artifact_id,
+          codex_doc_index_id,
           metadata,
           created_at
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
       `,
       [
         reviewId,
@@ -272,6 +291,7 @@ export class CodexCompatibilityService {
         flags.mcpRequiredSupported,
         gapSummary,
         artifactId,
+        flags.codexDocIndexId,
         metadata
       ]
     );
@@ -310,6 +330,9 @@ export class CodexCompatibilityService {
       stopHookCallbackVerified: false,
       jsonlParserRecognizesCurrentEvents: parserRecognizesRequiredCodexEvents(),
       mcpRequiredSupported: false,
+      codexDocsIndexed: false,
+      codexDocIndexId: null,
+      codexDocIndexStatus: "not_started",
       buildEnvironmentReady: false,
       gapSummary: "Codex compatibility review has not run.",
       artifactPath: null,
@@ -325,6 +348,19 @@ export class CodexCompatibilityService {
       ownership,
       createdAt: null
     };
+  }
+
+  private async getLatestCodexDocIndex(): Promise<LatestDocIndexRow | null> {
+    const result = await this.database.pool.query<LatestDocIndexRow>(
+      `
+        select id, status, metadata
+        from codex_doc_indexes
+        where index_name = 'openai-codex'
+        order by indexed_at desc nulls last
+        limit 1
+      `
+    );
+    return result.rows[0] ?? null;
   }
 
   private async runSmoke(smokeRoot: string, env: NodeJS.ProcessEnv) {
@@ -654,6 +690,8 @@ function summarizeGaps(input: {
   schemaJsonError: string | null;
   configError: string | null;
   ownershipConflicts: string[];
+  codexDocsIndexed: boolean;
+  codexDocsGapReport: string | null;
 }): string {
   const gaps = [
     !input.codexCliAvailable ? "Codex CLI is unavailable." : null,
@@ -674,6 +712,9 @@ function summarizeGaps(input: {
     !input.hooksSupported ? "Hook config did not load cleanly or ownership conflicts exist." : null,
     !input.stopHookCallbackVerified ? "Stop hook callback route could not record a backend callback." : null,
     !input.jsonlParserRecognizesCurrentEvents ? "JSONL parser does not recognize required event names." : null,
+    !input.codexDocsIndexed
+      ? `Codex official docs are not indexed: ${trimGap(input.codexDocsGapReport)}`
+      : null,
     ...input.ownershipConflicts
   ].filter((gap): gap is string => gap !== null);
   return gaps.length === 0 && input.buildEnvironmentReady
@@ -723,6 +764,7 @@ function renderReviewReport(
     `- Config validation passed: ${formatBool(review.configValidationPassed)}`,
     `- Stop hook callback verified: ${formatBool(review.stopHookCallbackVerified)}`,
     `- JSONL parser recognizes required events: ${formatBool(review.jsonlParserRecognizesCurrentEvents)}`,
+    `- Codex official docs indexed: ${formatBool(review.codexDocsIndexed)}`,
     "",
     "## Artifacts",
     "",

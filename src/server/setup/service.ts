@@ -50,6 +50,7 @@ type SetupRow = {
 
 const commandChecks: CommandCheckDefinition[] = [
   { id: "codex", command: "codex", args: ["--version"], required: true },
+  { id: "docs-mcp-server", command: "docs-mcp-server", args: ["--version"], required: true },
   { id: "git", command: "git", args: ["--version"], required: true },
   { id: "node", command: "node", args: ["--version"], required: true },
   { id: "python3", command: "python3", args: ["--version"], required: true },

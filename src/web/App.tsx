@@ -82,6 +82,9 @@ type CodexCompatibilityResponse = {
   configValidationPassed: boolean;
   stopHookCallbackVerified: boolean;
   jsonlParserRecognizesCurrentEvents: boolean;
+  codexDocsIndexed: boolean;
+  codexDocIndexId: string | null;
+  codexDocIndexStatus: "not_started" | "indexing" | "ready" | "failed";
   buildEnvironmentReady: boolean;
   gapSummary: string;
   artifactPath: string | null;
@@ -103,6 +106,25 @@ type CodexCompatibilityResponse = {
     conflicts: string[];
   };
   createdAt: string | null;
+};
+
+type CodexDocsIndexResponse = {
+  status: "not_started" | "indexing" | "ready" | "failed";
+  indexName: string;
+  storePath: string;
+  documentCount: number;
+  uniqueUrlCount: number;
+  codexCliVersion: string | null;
+  indexedUrlList: string[];
+  searchSmokeTest: {
+    query: string;
+    status: "pass" | "fail" | "not_run";
+    resultCount: number;
+    outputPreview: string;
+  };
+  artifactPath: string | null;
+  gapReport: string;
+  indexedAt: string | null;
 };
 
 type SetupStatus = {
@@ -199,8 +221,10 @@ export function App() {
   const [codexCompatibility, setCodexCompatibility] = useState<CodexCompatibilityResponse | null>(
     null
   );
+  const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
+  const [codexDocsBusy, setCodexDocsBusy] = useState(false);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -230,18 +254,20 @@ export function App() {
       }
       setSession((await sessionResponse.json()) as SessionResponse);
 
-      const [settingsResponse, fail2banResponse, codexResponse] = await Promise.all([
+      const [settingsResponse, fail2banResponse, codexResponse, codexDocsResponse] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
-        fetch("/api/codex/compatibility", { credentials: "include" })
+        fetch("/api/codex/compatibility", { credentials: "include" }),
+        fetch("/api/codex/docs", { credentials: "include" })
       ]);
-      if (!settingsResponse.ok || !fail2banResponse.ok || !codexResponse.ok) {
+      if (!settingsResponse.ok || !fail2banResponse.ok || !codexResponse.ok || !codexDocsResponse.ok) {
         setApiState("error");
         return;
       }
       setSettings((await settingsResponse.json()) as PublicSettings);
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
+      setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -265,6 +291,23 @@ export function App() {
     }
   }
 
+  async function runCodexDocsIndex() {
+    setCodexDocsBusy(true);
+    try {
+      const response = await fetch("/api/codex/docs/index", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        setCodexDocs((await response.json()) as CodexDocsIndexResponse);
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setCodexDocsBusy(false);
+    }
+  }
+
   const readiness = useMemo<KeyValueRows>(
     () => [
       ["Authentication", apiState === "ready" ? "Signed in" : statusLabel(apiState)],
@@ -275,8 +318,8 @@ export function App() {
     [apiState]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility),
-    [codexCompatibility]
+    () => createBuildRows(codexCompatibility, codexDocs),
+    [codexCompatibility, codexDocs]
   );
 
   return (
@@ -373,15 +416,24 @@ export function App() {
           <div id="build-environment" className="panel">
             <div className="panel-heading">
               <h2>Build Environment</h2>
-              <button
-                type="button"
-                disabled={apiState !== "ready" || codexReviewBusy}
-                onClick={() => void runCodexCompatibilityReview()}
-              >
-                {codexReviewBusy ? "Checking" : "Verify Codex"}
-              </button>
+              <div className="button-row">
+                <button
+                  type="button"
+                  disabled={apiState !== "ready" || codexDocsBusy}
+                  onClick={() => void runCodexDocsIndex()}
+                >
+                  {codexDocsBusy ? "Indexing" : "Index Docs"}
+                </button>
+                <button
+                  type="button"
+                  disabled={apiState !== "ready" || codexReviewBusy}
+                  onClick={() => void runCodexCompatibilityReview()}
+                >
+                  {codexReviewBusy ? "Checking" : "Verify Codex"}
+                </button>
+              </div>
             </div>
-            <KeyValueList rows={buildEnvironmentRows.slice(0, 4)} />
+            <KeyValueList rows={buildEnvironmentRows.slice(0, 6)} />
           </div>
 
           <div className="panel">
@@ -440,6 +492,7 @@ export function App() {
                 session,
                 fail2ban,
                 codexCompatibility,
+                codexDocs,
                 buildEnvironmentRows,
                 apiState
               )}
@@ -635,6 +688,7 @@ function renderSettingsTab(
   session: SessionResponse | null,
   fail2ban: Fail2banResponse | null,
   codexCompatibility: CodexCompatibilityResponse | null,
+  codexDocs: CodexDocsIndexResponse | null,
   buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error"
 ) {
@@ -683,11 +737,28 @@ function renderSettingsTab(
               ["Output schema", boolLabel(codexCompatibility?.outputSchemaSupported)],
               ["Output last message", boolLabel(codexCompatibility?.outputLastMessageSupported)],
               ["Exec resume", boolLabel(codexCompatibility?.execResumeSupported)],
+              ["Official docs indexed", boolLabel(codexCompatibility?.codexDocsIndexed)],
+              ["Docs index status", codexCompatibility?.codexDocIndexStatus ?? "not_started"],
               ["Config validation", boolLabel(codexCompatibility?.configValidationPassed)],
               ["Stop hook callback", boolLabel(codexCompatibility?.stopHookCallbackVerified)],
               ["Schema artifact", codexCompatibility?.generatedSchemaPaths.jsonSchema ?? "Unavailable"],
               ["Review artifact", codexCompatibility?.artifactPath ?? "Unavailable"],
               ["Gap summary", codexCompatibility?.gapSummary ?? "Review has not run."]
+            ]}
+          />
+          <SettingsGroup
+            title="Codex Documentation Index"
+            rows={[
+              ["Index status", codexDocs?.status ?? "not_started"],
+              ["Index name", codexDocs?.indexName ?? "openai-codex"],
+              ["Document count", `${codexDocs?.documentCount ?? 0}`],
+              ["Unique URLs", `${codexDocs?.uniqueUrlCount ?? 0}`],
+              ["Search smoke", codexDocs?.searchSmokeTest.status ?? "not_run"],
+              ["Search result count", `${codexDocs?.searchSmokeTest.resultCount ?? 0}`],
+              ["Store path", codexDocs?.storePath ?? "Unavailable"],
+              ["Index artifact", codexDocs?.artifactPath ?? "Unavailable"],
+              ["Indexed at", codexDocs?.indexedAt ?? "Never"],
+              ["Gap report", codexDocs?.gapReport ?? "Codex official documentation has not been indexed."]
             ]}
           />
         </div>
@@ -759,7 +830,10 @@ function renderSettingsTab(
   }
 }
 
-function createBuildRows(codexCompatibility: CodexCompatibilityResponse | null): KeyValueRows {
+function createBuildRows(
+  codexCompatibility: CodexCompatibilityResponse | null,
+  codexDocs: CodexDocsIndexResponse | null
+): KeyValueRows {
   return [
     ["Android SDK", "Not installed"],
     ["Gradle", "Not installed"],
@@ -769,6 +843,7 @@ function createBuildRows(codexCompatibility: CodexCompatibilityResponse | null):
     ["MCP status", "Pending setup"],
     ["Skill/agent wiring", "Pending setup"],
     ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],
+    ["Codex docs index", codexDocsLabel(codexDocs)],
     ["Compatibility review", codexCompatibility?.status ?? "Not run"],
     ["Managed config", codexCompatibility?.ownership.configOwner ?? "missing"],
     ["Managed hooks", codexCompatibility?.ownership.hooksOwner ?? "missing"],
@@ -779,6 +854,16 @@ function createBuildRows(codexCompatibility: CodexCompatibilityResponse | null):
         : "None"
     ]
   ];
+}
+
+function codexDocsLabel(codexDocs: CodexDocsIndexResponse | null): string {
+  if (!codexDocs || codexDocs.status === "not_started") {
+    return "Not indexed";
+  }
+  if (codexDocs.status === "ready") {
+    return `${codexDocs.uniqueUrlCount} URLs indexed`;
+  }
+  return codexDocs.status;
 }
 
 function codexRuntimeLabel(codexCompatibility: CodexCompatibilityResponse | null): string {

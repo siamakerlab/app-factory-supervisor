@@ -16,6 +16,8 @@ export type RuntimePaths = {
   codexSchemaDir: string;
   codexSmokeDir: string;
   codexCompatibilityReportPath: string;
+  codexDocsStoreDir: string;
+  codexDocsReportPath: string;
 };
 
 export function getRuntimePaths(config: AppConfig): RuntimePaths {
@@ -25,6 +27,9 @@ export function getRuntimePaths(config: AppConfig): RuntimePaths {
   const codexCompatibilityReportPath =
     config.CODEX_COMPATIBILITY_REPORT_PATH ??
     join(config.APP_DATA_DIR, "artifacts", "codex-compatibility-review.md");
+  const codexDocsStoreDir = config.DOCS_MCP_STORE_PATH ?? join(config.APP_DATA_DIR, "mobile-docs");
+  const codexDocsReportPath =
+    config.CODEX_DOCS_REPORT_PATH ?? join(config.APP_DATA_DIR, "artifacts", "codex-doc-index.md");
 
   return {
     dataDir: config.APP_DATA_DIR,
@@ -38,7 +43,9 @@ export function getRuntimePaths(config: AppConfig): RuntimePaths {
     codexHomeDir,
     codexSchemaDir,
     codexSmokeDir,
-    codexCompatibilityReportPath
+    codexCompatibilityReportPath,
+    codexDocsStoreDir,
+    codexDocsReportPath
   };
 }
 
@@ -55,7 +62,9 @@ export async function ensureRuntimeDirectories(paths: RuntimePaths): Promise<voi
     paths.codexHomeDir,
     paths.codexSchemaDir,
     paths.codexSmokeDir,
-    dirname(paths.codexCompatibilityReportPath)
+    dirname(paths.codexCompatibilityReportPath),
+    paths.codexDocsStoreDir,
+    dirname(paths.codexDocsReportPath)
   ];
 
   await Promise.all(

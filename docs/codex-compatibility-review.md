@@ -28,7 +28,8 @@ Environment verification action.
 
 ## Remaining Follow-Up
 
-- Phase 10 will index official Codex documentation through mobile-docs MCP.
+- Phase 10 indexes official Codex documentation through `docs-mcp-server` and links the latest
+  ready `openai-codex` index to compatibility reviews.
 - Later runner phases will attach project-specific supervisor and worker output schemas.
 - MCP-required support remains intentionally false until the MCP installation wizard phase verifies
   required servers.

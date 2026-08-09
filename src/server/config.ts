@@ -16,6 +16,8 @@ const envSchema = z.object({
   CODEX_SCHEMA_DIR: z.string().min(1).optional(),
   CODEX_COMPATIBILITY_REPORT_PATH: z.string().min(1).optional(),
   CODEX_SMOKE_DIR: z.string().min(1).optional(),
+  DOCS_MCP_STORE_PATH: z.string().min(1).optional(),
+  CODEX_DOCS_REPORT_PATH: z.string().min(1).optional(),
   TRUST_PROXY: z.coerce.boolean().default(false),
   SESSION_COOKIE_NAME: z.string().min(1).default("afs_session"),
   SESSION_COOKIE_SECURE: z.coerce.boolean().default(false),

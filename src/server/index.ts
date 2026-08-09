@@ -1,6 +1,7 @@
 import { buildServer } from "./app.js";
 import { AuthService } from "./auth/service.js";
 import { CodexCompatibilityService } from "./codex/compatibility.js";
+import { CodexDocsIndexService } from "./codex/docs.js";
 import { registerCodexRoutes } from "./codex/routes.js";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
@@ -20,6 +21,7 @@ const settingsService = new SettingsService(database);
 const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
+const codexDocsIndexService = new CodexDocsIndexService(database, config);
 const server = await buildServer({
   readiness,
   authService,
@@ -27,7 +29,7 @@ const server = await buildServer({
 });
 registerFail2banRoutes(server, database);
 registerSetupRoutes(server, setupService);
-registerCodexRoutes(server, codexCompatibilityService);
+registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

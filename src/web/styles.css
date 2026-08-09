@@ -185,6 +185,13 @@ button {
   border-radius: 6px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .table {
   display: grid;
   border: 1px solid #d8e0e8;
