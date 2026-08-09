@@ -10,6 +10,8 @@ import { registerCodexRoutes } from "./codex/routes.js";
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
+import { registerProjectExportRoutes } from "./exports/routes.js";
+import { ProjectExportService } from "./exports/service.js";
 import { GitAutomationService } from "./projects/gitAutomation.js";
 import { registerProjectRoutes } from "./projects/routes.js";
 import { ProjectService } from "./projects/service.js";
@@ -28,6 +30,7 @@ const readiness = {
 };
 const settingsService = new SettingsService(database);
 const artifactService = new ArtifactService(database, config);
+const projectExportService = new ProjectExportService(database, config);
 const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
@@ -48,6 +51,7 @@ registerToolchainRoutes(server, toolchainService);
 registerCapabilityRoutes(server, capabilityService);
 registerProjectRoutes(server, projectService, gitAutomationService);
 registerArtifactRoutes(server, artifactService);
+registerProjectExportRoutes(server, projectExportService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

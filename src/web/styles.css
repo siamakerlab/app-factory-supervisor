@@ -201,13 +201,20 @@ button {
 
 .table-row {
   display: grid;
-  grid-template-columns: 1.1fr 0.9fr 0.8fr 0.8fr 0.9fr;
+  grid-template-columns: 1.1fr 0.9fr 0.75fr 0.8fr 0.85fr 0.6fr;
   gap: 10px;
   align-items: center;
   min-height: 42px;
   padding: 0 10px;
   border-top: 1px solid #e2e8f0;
   font-size: 13px;
+}
+
+.table-row button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .table-row:first-child {
@@ -671,6 +678,47 @@ button {
   text-decoration: none;
 }
 
+.export-table {
+  display: grid;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.export-row {
+  display: grid;
+  grid-template-columns: 0.8fr 0.6fr 0.7fr 1fr 1.4fr 0.7fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 9px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.export-row:first-child {
+  border-top: 0;
+}
+
+.export-head {
+  color: #607082;
+  background: #f5f7fa;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.export-row span,
+.export-row a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.export-row a {
+  color: #176c64;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -715,6 +763,11 @@ button {
   }
 
   .artifact-row {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  .export-row {
     grid-template-columns: 1fr;
     padding: 10px;
   }

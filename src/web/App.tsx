@@ -266,10 +266,33 @@ type ArtifactSummary = {
   verifiedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
+  metadata: Record<string, unknown>;
 };
 
 type ArtifactsResponse = {
   artifacts: ArtifactSummary[];
+};
+
+type ProjectExportSummary = {
+  id: string;
+  projectId: string;
+  status: "queued" | "running" | "ready" | "failed" | "expired" | "deleted";
+  exportType: "full_project_archive";
+  includeIgnoredFiles: boolean;
+  includeKeystores: boolean;
+  artifactId: string | null;
+  fileCount: number | null;
+  sizeBytes: number | null;
+  sha256: string | null;
+  errorSummary: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  expiresAt: string | null;
+};
+
+type ProjectExportsResponse = {
+  exports: ProjectExportSummary[];
 };
 
 type SettingsTab =
@@ -337,12 +360,14 @@ export function App() {
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
+  const [projectExports, setProjectExports] = useState<ProjectExportSummary[]>([]);
   const [projectWizardOpen, setProjectWizardOpen] = useState(false);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
+  const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -380,7 +405,8 @@ export function App() {
         toolchainResponse,
         capabilityResponse,
         projectsResponse,
-        artifactsResponse
+        artifactsResponse,
+        exportsResponse
       ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
@@ -389,7 +415,8 @@ export function App() {
         fetch("/api/toolchain/status", { credentials: "include" }),
         fetch("/api/capabilities/status", { credentials: "include" }),
         fetch("/api/projects", { credentials: "include" }),
-        fetch("/api/artifacts?limit=12", { credentials: "include" })
+        fetch("/api/artifacts?limit=12", { credentials: "include" }),
+        fetch("/api/project-exports?limit=8", { credentials: "include" })
       ]);
       if (
         !settingsResponse.ok ||
@@ -399,7 +426,8 @@ export function App() {
         !toolchainResponse.ok ||
         !capabilityResponse.ok ||
         !projectsResponse.ok ||
-        !artifactsResponse.ok
+        !artifactsResponse.ok ||
+        !exportsResponse.ok
       ) {
         setApiState("error");
         return;
@@ -412,6 +440,7 @@ export function App() {
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
       setProjects(((await projectsResponse.json()) as ProjectsResponse).projects);
       setArtifacts(((await artifactsResponse.json()) as ArtifactsResponse).artifacts);
+      setProjectExports(((await exportsResponse.json()) as ProjectExportsResponse).exports);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -483,6 +512,24 @@ export function App() {
       }
     } finally {
       setCapabilityBusy(false);
+    }
+  }
+
+  async function requestProjectExport(projectId: string) {
+    setExportBusyProjectId(projectId);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/exports`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        setApiState("error");
+        return;
+      }
+      await response.json();
+      await loadApiState();
+    } finally {
+      setExportBusyProjectId(null);
     }
   }
 
@@ -591,6 +638,7 @@ export function App() {
                 <span>Progress</span>
                 <span>Version</span>
                 <span>Status</span>
+                <span>Actions</span>
               </div>
               {projects.length === 0 ? (
                 <div className="table-row">
@@ -603,6 +651,7 @@ export function App() {
                   </span>
                   <span>None</span>
                   <span className="chip muted">Setup required</span>
+                  <span />
                 </div>
               ) : null}
               {projects.map((project) => (
@@ -617,6 +666,15 @@ export function App() {
                   <span title={versionTitle(project)}>{project.currentVersion ?? "No version"}</span>
                   <span className={project.status === "running" ? "chip" : "chip muted"}>
                     {project.status}
+                  </span>
+                  <span>
+                    <button
+                      type="button"
+                      disabled={exportBusyProjectId === project.id}
+                      onClick={() => void requestProjectExport(project.id)}
+                    >
+                      {exportBusyProjectId === project.id ? "Zipping" : "ZIP"}
+                    </button>
                   </span>
                 </div>
               ))}
@@ -689,6 +747,14 @@ export function App() {
               <Database size={18} />
             </div>
             <ArtifactTable artifacts={artifacts} />
+          </div>
+
+          <div className="panel wide">
+            <div className="panel-heading">
+              <h2>Project Exports</h2>
+              <Database size={18} />
+            </div>
+            <ProjectExportTable exports={projectExports} />
           </div>
         </section>
 
@@ -1352,11 +1418,53 @@ function ArtifactTable({ artifacts }: { artifacts: ArtifactSummary[] }) {
           <span>{formatBytes(artifact.sizeBytes)}</span>
           <span>{artifact.retentionClass}</span>
           <span title={artifact.sha256 ?? "No hash"}>{artifact.sha256?.slice(0, 12) ?? "none"}</span>
-          <a href={`/api/artifacts/${artifact.id}/content`}>Download</a>
+          <a href={artifactDownloadHref(artifact)}>Download</a>
         </div>
       ))}
     </div>
   );
+}
+
+function ProjectExportTable({ exports }: { exports: ProjectExportSummary[] }) {
+  if (exports.length === 0) {
+    return <p className="muted-copy">No project ZIP exports have been requested.</p>;
+  }
+  return (
+    <div className="export-table">
+      <div className="export-row export-head">
+        <span>Status</span>
+        <span>Files</span>
+        <span>Size</span>
+        <span>Checksum</span>
+        <span>Expires</span>
+        <span>Download</span>
+      </div>
+      {exports.map((exportRecord) => (
+        <div className="export-row" key={exportRecord.id}>
+          <span>{exportRecord.status}</span>
+          <span>{exportRecord.fileCount ?? "unknown"}</span>
+          <span>{formatBytes(exportRecord.sizeBytes)}</span>
+          <span title={exportRecord.sha256 ?? "No checksum"}>
+            {exportRecord.sha256?.slice(0, 12) ?? "none"}
+          </span>
+          <span>{exportRecord.expiresAt ?? "none"}</span>
+          {exportRecord.status === "ready" ? (
+            <a href={`/api/project-exports/${exportRecord.id}/download`}>ZIP</a>
+          ) : (
+            <span>{exportRecord.errorSummary ?? "Unavailable"}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function artifactDownloadHref(artifact: ArtifactSummary): string {
+  const exportId = artifact.metadata.exportId;
+  if (artifact.artifactType === "project_export" && typeof exportId === "string") {
+    return `/api/project-exports/${exportId}/download`;
+  }
+  return `/api/artifacts/${artifact.id}/content`;
 }
 
 function formatBytes(value: number | null): string {

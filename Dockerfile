@@ -27,7 +27,11 @@ ENV ANDROID_AVD_HOME=/app/data/toolchains/avd
 ENV PATH=/app/data/toolchains/android-sdk/platform-tools:/app/data/toolchains/android-sdk/cmdline-tools/latest/bin:/app/data/toolchains/android-sdk/emulator:/app/data/toolchains/gradle/bin:$PATH
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends zip \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm ci --omit=dev \
+  && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
