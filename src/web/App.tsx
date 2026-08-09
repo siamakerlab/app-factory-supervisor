@@ -534,6 +534,7 @@ export function App() {
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
   const [toolchainBusy, setToolchainBusy] = useState(false);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
+  const [hooksBusy, setHooksBusy] = useState(false);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [completionGate, setCompletionGate] = useState<CompletionGateResponse | null>(null);
@@ -792,6 +793,27 @@ export function App() {
     }
   }
 
+  async function installManagedHooks() {
+    setHooksBusy(true);
+    try {
+      const response = await fetch("/api/codex/hooks/install", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ force: false })
+      });
+      if (response.ok) {
+        setCodexHooks((await response.json()) as CodexHookStatusResponse);
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setHooksBusy(false);
+    }
+  }
+
   async function requestProjectExport(projectId: string) {
     setExportBusyProjectId(projectId);
     try {
@@ -823,8 +845,8 @@ export function App() {
     [apiState, jobsStatus]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility, codexDocs, toolchain, capabilities),
-    [codexCompatibility, codexDocs, toolchain, capabilities]
+    () => createBuildRows(codexCompatibility, codexHooks, codexDocs, toolchain, capabilities),
+    [codexCompatibility, codexHooks, codexDocs, toolchain, capabilities]
   );
 
   return (
@@ -1033,9 +1055,16 @@ export function App() {
                 >
                   {codexReviewBusy ? "Checking" : "Verify Codex"}
                 </button>
+                <button
+                  type="button"
+                  disabled={apiState !== "ready" || hooksBusy}
+                  onClick={() => void installManagedHooks()}
+                >
+                  {hooksBusy ? "Installing" : "Install Hooks"}
+                </button>
               </div>
             </div>
-            <KeyValueList rows={buildEnvironmentRows.slice(0, 6)} />
+            <KeyValueList rows={buildEnvironmentRows} />
           </div>
 
           <div className="panel">
@@ -1996,10 +2025,16 @@ function renderSettingsTab(
 
 function createBuildRows(
   codexCompatibility: CodexCompatibilityResponse | null,
+  codexHooks: CodexHookStatusResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   toolchain: ToolchainResponse | null,
   capabilities: CapabilityResponse | null
 ): KeyValueRows {
+  const ownershipConflicts = [
+    ...(codexCompatibility?.ownership.conflicts ?? []),
+    ...(codexHooks?.conflicts ?? []),
+    ...(capabilities?.conflictSummary ? [capabilities.conflictSummary] : [])
+  ];
   return [
     ["Android SDK", toolchain?.latestSnapshot ? toolchain.latestSnapshot.androidPlatformVersion : "Not installed"],
     ["Gradle", toolchain?.latestSnapshot?.gradleVersion ?? "Not installed"],
@@ -2007,20 +2042,35 @@ function createBuildRows(
     ["Toolchain snapshots", toolchain?.latestSnapshot ? toolchain.latestSnapshot.snapshotName : "None"],
     ["AVD/emulator", toolchain?.latestSnapshot?.emulatorImage ?? "Not verified"],
     ["Toolchain install", toolchain?.status ?? "not_started"],
+    ["Toolchain blockers", toolchain?.errorSummary ?? failedStepSummary(toolchain?.steps) ?? "None"],
     ["MCP status", capabilityTypeLabel(capabilities, "mcp")],
     ["Skill/agent wiring", `${capabilityTypeLabel(capabilities, "skill")} / ${capabilityTypeLabel(capabilities, "agent")}`],
+    ["Codex CLI version", codexCompatibility?.codexCliVersion ?? codexHooks?.codexCliVersion ?? "Unknown"],
+    ["Codex auth", boolLabel(codexCompatibility?.codexAuthUsable)],
+    ["Codex JSONL dry-run", boolLabel(codexCompatibility?.jsonModeSupported && codexCompatibility.outputLastMessageSupported)],
+    ["App-server TS schema", boolLabel(codexCompatibility?.appServerTypeScriptSchemasGenerated)],
+    ["App-server JSON schema", boolLabel(codexCompatibility?.appServerJsonSchemasGenerated)],
+    ["Config schema validation", boolLabel(codexCompatibility?.configValidationPassed)],
+    ["Stop hook callback", boolLabel(codexCompatibility?.stopHookCallbackVerified)],
+    ["Managed config owner", codexHooks?.configOwner ?? codexCompatibility?.ownership.configOwner ?? "missing"],
+    ["Managed hook owner", codexHooks?.hooksOwner ?? codexCompatibility?.ownership.hooksOwner ?? "missing"],
+    ["Hook poll interval", `${codexHooks?.workerPollIntervalSeconds ?? "-"} seconds`],
+    ["Setup rerun safety", ownershipConflicts.length > 0 ? "Blocked by ownership conflict" : "Safe; no overwrite conflict"],
     ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],
     ["Codex docs index", codexDocsLabel(codexDocs)],
     ["Compatibility review", codexCompatibility?.status ?? "Not run"],
-    ["Managed config", codexCompatibility?.ownership.configOwner ?? "missing"],
-    ["Managed hooks", codexCompatibility?.ownership.hooksOwner ?? "missing"],
     [
       "Ownership conflicts",
-      codexCompatibility?.ownership.conflicts.length
-        ? codexCompatibility.ownership.conflicts.join("; ")
+      ownershipConflicts.length
+        ? ownershipConflicts.join("; ")
         : "None"
     ]
   ];
+}
+
+function failedStepSummary(steps: Array<{ label: string; status: string; output: string }> | undefined): string | null {
+  const failed = steps?.find((step) => step.status === "fail");
+  return failed ? `${failed.label}: ${failed.output || "failed"}` : null;
 }
 
 function CapabilityInventory({ capabilities }: { capabilities: CapabilityResponse | null }) {
