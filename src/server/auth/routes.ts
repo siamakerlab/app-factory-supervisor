@@ -30,6 +30,10 @@ export function registerAuthRoutes(
       return;
     }
 
+    if (!request.routeOptions.url?.startsWith("/api/")) {
+      return;
+    }
+
     const configured = await authService.isAdminConfigured();
     if (!configured) {
       return reply.code(428).send({
@@ -37,15 +41,13 @@ export function registerAuthRoutes(
       });
     }
 
-    if (request.routeOptions.url?.startsWith("/api/")) {
-      const session = await authService.getSession(readSessionToken(request, config));
-      if (!session) {
-        return reply.code(401).send({
-          error: "authentication_required"
-        });
-      }
-      request.sessionUser = session;
+    const session = await authService.getSession(readSessionToken(request, config));
+    if (!session) {
+      return reply.code(401).send({
+        error: "authentication_required"
+      });
     }
+    request.sessionUser = session;
   });
 
   server.post("/api/setup/admin", async (request, reply) => {
