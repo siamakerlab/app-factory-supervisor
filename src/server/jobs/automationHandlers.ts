@@ -6,7 +6,7 @@ import type { JobHandlers, JobSummary } from "./service.js";
 type JobEnqueuer = {
   enqueue(input: {
     projectId: string;
-    jobType: "worker_turn";
+    jobType: "supervisor_turn" | "worker_turn";
     priority?: number;
     maxAttempts?: number;
     metadata?: Record<string, unknown>;
@@ -63,12 +63,27 @@ export function createAutomationJobHandlers(input: {
       if (result.status === "failed") {
         throw new Error(`worker_turn_failed:${result.exitCode ?? "unknown"}`);
       }
+      const completion = await input.projectService.evaluateAndApplyCompletionGate(job.projectId);
+      const nextSupervisorJob =
+        completion?.status === "running"
+          ? await input.jobEnqueuer.enqueue({
+              projectId: job.projectId,
+              jobType: "supervisor_turn",
+              priority: Math.max(job.priority, 1),
+              metadata: {
+                previousWorkerJobId: job.id,
+                previousWorkerRunId: result.runId
+              }
+            })
+          : null;
       return {
         summary: `Worker turn ${result.runId} completed.`,
         metadata: {
           runId: result.runId,
           exitCode: result.exitCode,
-          finalMessageArtifactId: result.finalMessageArtifactId
+          finalMessageArtifactId: result.finalMessageArtifactId,
+          completionStatus: completion?.status ?? "unknown",
+          nextSupervisorJobId: nextSupervisorJob?.id ?? null
         }
       };
     }

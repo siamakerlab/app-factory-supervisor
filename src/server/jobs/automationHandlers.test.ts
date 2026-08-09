@@ -51,13 +51,18 @@ describe("automation job handlers", () => {
       exitCode: 0,
       finalMessageArtifactId: "artifact-1"
     });
+    const enqueue = vi.fn().mockResolvedValue(job({ id: "supervisor-job-2", jobType: "supervisor_turn" }));
     const handlers = createAutomationJobHandlers({
-      projectService: {} as ProjectService,
+      projectService: {
+        evaluateAndApplyCompletionGate: vi.fn().mockResolvedValue({
+          status: "running"
+        })
+      } as Partial<ProjectService> as ProjectService,
       codexRunnerService: {
         run
       } as Partial<CodexRunnerService> as CodexRunnerService,
       jobEnqueuer: {
-        enqueue: vi.fn()
+        enqueue
       }
     });
 
@@ -75,10 +80,58 @@ describe("automation job handlers", () => {
       role: "worker",
       prompt: "Implement the next roadmap item."
     });
+    expect(enqueue).toHaveBeenCalledWith({
+      projectId,
+      jobType: "supervisor_turn",
+      priority: 10,
+      metadata: {
+        previousWorkerJobId: "job-1",
+        previousWorkerRunId: "run-1"
+      }
+    });
     expect(result.metadata).toMatchObject({
       runId: "run-1",
       exitCode: 0,
-      finalMessageArtifactId: "artifact-1"
+      finalMessageArtifactId: "artifact-1",
+      completionStatus: "running",
+      nextSupervisorJobId: "supervisor-job-2"
+    });
+  });
+
+  it("does not enqueue another supervisor turn after a terminal completion gate", async () => {
+    const enqueue = vi.fn();
+    const handlers = createAutomationJobHandlers({
+      projectService: {
+        evaluateAndApplyCompletionGate: vi.fn().mockResolvedValue({
+          status: "production_ready_user_action_required"
+        })
+      } as Partial<ProjectService> as ProjectService,
+      codexRunnerService: {
+        run: vi.fn().mockResolvedValue({
+          runId: "run-1",
+          status: "succeeded",
+          exitCode: 0,
+          finalMessageArtifactId: "artifact-1"
+        })
+      } as Partial<CodexRunnerService> as CodexRunnerService,
+      jobEnqueuer: {
+        enqueue
+      }
+    });
+
+    const result = await handlers.worker_turn!(
+      job({
+        jobType: "worker_turn",
+        metadata: {
+          prompt: "Summarize release readiness."
+        }
+      })
+    );
+
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(result.metadata).toMatchObject({
+      completionStatus: "production_ready_user_action_required",
+      nextSupervisorJobId: null
     });
   });
 });

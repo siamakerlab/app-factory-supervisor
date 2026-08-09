@@ -25,6 +25,7 @@ export type CodexRunnerCommand = {
   command: string;
   args: string[];
   cwd: string;
+  env: NodeJS.ProcessEnv;
   jsonlPath: string;
   stderrPath: string;
   lastMessagePath: string;
@@ -148,6 +149,7 @@ export class CodexRunnerService {
         input.prompt
       ],
       cwd: project.project_dir,
+      env: this.workerEnvironment(project.project_dir),
       jsonlPath,
       stderrPath,
       lastMessagePath,
@@ -288,6 +290,7 @@ export class CodexRunnerService {
         input.prompt
       ],
       cwd: projectDir,
+      env: this.workerEnvironment(projectDir),
       jsonlPath,
       stderrPath,
       lastMessagePath,
@@ -306,6 +309,15 @@ export class CodexRunnerService {
       throw new Error("project_not_found");
     }
     return project;
+  }
+
+  private workerEnvironment(projectDir: string): NodeJS.ProcessEnv {
+    const paths = getRuntimePaths(this.config);
+    return {
+      ...allowedWorkerEnvironment(),
+      CODEX_HOME: paths.codexHomeDir,
+      HOME: projectDir
+    };
   }
 
   private async nextIteration(projectId: string, role: CodexRunRole): Promise<number> {
@@ -459,7 +471,7 @@ function runProcess(command: CodexRunnerCommand): Promise<{ exitCode: number | n
   return new Promise((resolve) => {
     const child = spawn(command.command, command.args, {
       cwd: command.cwd,
-      env: allowedWorkerEnvironment(),
+      env: command.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     const stdoutChunks: Buffer[] = [];

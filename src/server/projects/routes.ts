@@ -114,6 +114,17 @@ export function registerProjectRoutes(
           error: "project_not_found"
         });
       }
+      const activeJob = jobService
+        ? await jobService.getActiveProjectAutomationJob(request.params.projectId)
+        : null;
+      if (activeJob) {
+        return reply.code(202).send({
+          projectId: request.params.projectId,
+          job: activeJob,
+          nextPrompt: planNextWorkerPrompt(project),
+          project
+        });
+      }
       const nextPrompt = planNextWorkerPrompt(project);
       const job = jobService
         ? await jobService.enqueue({

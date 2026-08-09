@@ -167,6 +167,22 @@ export class JobService {
     return (await this.getJob(id))!;
   }
 
+  async getActiveProjectAutomationJob(projectId: string): Promise<JobSummary | null> {
+    const result = await this.database.pool.query<JobRow>(
+      `
+        select *
+        from jobs
+        where project_id = $1
+          and job_type in ('supervisor_turn', 'worker_turn')
+          and status in ('queued', 'waiting_resources', 'running')
+        order by priority desc, scheduled_at asc
+        limit 1
+      `,
+      [projectId]
+    );
+    return result.rows[0] ? mapJobRow(result.rows[0]) : null;
+  }
+
   async getStatus(): Promise<{
     resourceSnapshot: ResourceSnapshot;
     jobs: JobSummary[];

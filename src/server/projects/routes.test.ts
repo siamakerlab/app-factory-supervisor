@@ -29,6 +29,7 @@ describe("project run routes", () => {
       {} as never,
       undefined,
       {
+        getActiveProjectAutomationJob: vi.fn().mockResolvedValue(null),
         enqueue
       } as Partial<JobService> as JobService
     );
@@ -54,6 +55,45 @@ describe("project run routes", () => {
         id: projectId,
         status: "running"
       }
+    });
+  });
+
+  it("does not enqueue a duplicate automation job when one is already active", async () => {
+    const activeJob = {
+      id: "active-job-1",
+      projectId,
+      jobType: "worker_turn",
+      status: "running"
+    };
+    const enqueue = vi.fn();
+    const server = await buildServer({
+      readiness: {
+        migrated: true
+      }
+    });
+    registerProjectRoutes(
+      server,
+      {
+        getProjectDetail: vi.fn().mockResolvedValue(projectDetail())
+      } as Partial<ProjectService> as ProjectService,
+      {} as never,
+      undefined,
+      {
+        getActiveProjectAutomationJob: vi.fn().mockResolvedValue(activeJob),
+        enqueue
+      } as Partial<JobService> as JobService
+    );
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/run/start`
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(response.json()).toMatchObject({
+      projectId,
+      job: activeJob
     });
   });
 

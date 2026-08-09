@@ -29,6 +29,8 @@ describe("CodexRunnerService", () => {
     expect(command.args).toContain("--output-last-message");
     expect(command.args).toContain("-C");
     expect(command.args).toContain(projectDir);
+    expect(command.env.CODEX_HOME).toBe(join(dataDir, "codex-home"));
+    expect(command.env.HOME).toBe(projectDir);
     expect(command.jsonlPath).toContain("worker-1");
     const schema = JSON.parse(await readFile(command.schemaPath, "utf8")) as {
       required: string[];
