@@ -89,9 +89,50 @@ function chooseWorkerOption(workerResponse: string | null): string | null {
   if (!workerResponse) {
     return null;
   }
+  const jsonOption = chooseJsonWorkerOption(workerResponse);
+  if (jsonOption) {
+    return jsonOption;
+  }
   const optionPattern = /^\s*([A-G])[).:\s-]/gm;
   const matches = [...workerResponse.matchAll(optionPattern)];
   return matches[0]?.[1] ?? null;
+}
+
+function chooseJsonWorkerOption(workerResponse: string): string | null {
+  try {
+    const parsed = JSON.parse(workerResponse) as { suggestedOptions?: unknown; nextActions?: unknown };
+    const candidates = [parsed.suggestedOptions, parsed.nextActions];
+    for (const candidate of candidates) {
+      const option = firstOption(candidate);
+      if (option) {
+        return option;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function firstOption(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  for (const item of value) {
+    if (typeof item === "object" && item !== null) {
+      const option = (item as { option?: unknown }).option;
+      if (typeof option === "string" && /^[A-G]$/.test(option)) {
+        return option;
+      }
+    }
+    if (typeof item === "string") {
+      const match = item.match(/^\s*([A-G])[).:\s-]/);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+  }
+  return null;
 }
 
 function result(

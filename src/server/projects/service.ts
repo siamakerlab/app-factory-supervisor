@@ -163,13 +163,20 @@ export type ProjectArtifactSummary = {
 
 export type ProjectExportSummary = {
   id: string;
+  projectId: string;
   status: "queued" | "running" | "ready" | "failed" | "expired" | "deleted";
+  exportType: "full_project_archive";
+  includeIgnoredFiles: boolean;
+  includeKeystores: boolean;
   artifactId: string | null;
   fileCount: number | null;
   sizeBytes: number | null;
+  sha256: string | null;
   errorSummary: string | null;
   requestedAt: string;
+  startedAt: string | null;
   finishedAt: string | null;
+  expiresAt: string | null;
 };
 
 type ProjectRow = {
@@ -253,13 +260,20 @@ type ProjectArtifactRow = {
 
 type ProjectExportRow = {
   id: string;
+  project_id: string;
   status: ProjectExportSummary["status"];
+  export_type: "full_project_archive";
+  include_ignored_files: boolean;
+  include_keystores: boolean;
   artifact_id: string | null;
   file_count: number | null;
   size_bytes: string | number | null;
+  sha256: string | null;
   error_summary: string | null;
   requested_at: Date;
+  started_at: Date | null;
   finished_at: Date | null;
+  expires_at: Date | null;
 };
 
 type RunHistoryRow = {
@@ -1003,7 +1017,8 @@ export class ProjectService {
     const result = await this.database.pool.query<ProjectExportRow>(
       `
         select id, status, artifact_id, file_count, size_bytes, error_summary,
-          requested_at, finished_at
+          project_id, export_type, include_ignored_files, include_keystores,
+          sha256, requested_at, started_at, finished_at, expires_at
         from project_exports
         where project_id = $1
         order by requested_at desc
@@ -1013,13 +1028,20 @@ export class ProjectService {
     );
     return result.rows.map((row) => ({
       id: row.id,
+      projectId: row.project_id,
       status: row.status,
+      exportType: row.export_type,
+      includeIgnoredFiles: row.include_ignored_files,
+      includeKeystores: row.include_keystores,
       artifactId: row.artifact_id,
       fileCount: row.file_count,
       sizeBytes: row.size_bytes === null ? null : Number(row.size_bytes),
+      sha256: row.sha256,
       errorSummary: row.error_summary,
       requestedAt: row.requested_at.toISOString(),
-      finishedAt: row.finished_at?.toISOString() ?? null
+      startedAt: row.started_at?.toISOString() ?? null,
+      finishedAt: row.finished_at?.toISOString() ?? null,
+      expiresAt: row.expires_at?.toISOString() ?? null
     }));
   }
 

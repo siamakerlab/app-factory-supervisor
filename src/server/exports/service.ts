@@ -63,6 +63,10 @@ type ArtifactRow = {
   deleted_at: Date | null;
 };
 
+type ExportTimeoutRow = {
+  export_timeout_seconds: number;
+};
+
 export class ProjectExportService {
   constructor(
     private readonly database: Database,
@@ -104,6 +108,7 @@ export class ProjectExportService {
     await mkdir(exportDir, { recursive: true, mode: 0o700 });
     const zipPath = join(exportDir, `${safeName(project.project_name)}-${id}.zip`);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const timeoutMs = await this.getExportTimeoutMs();
 
     await this.database.pool.query(
       `
@@ -125,7 +130,7 @@ export class ProjectExportService {
       const fileCount = await countFiles(project.project_dir);
       const zip = await runCommand("zip", ["-r", "-q", zipPath, "."], {
         cwd: project.project_dir,
-        timeoutMs: 30 * 60 * 1000
+        timeoutMs
       });
       if (zip.exitCode !== 0) {
         throw new Error(zip.output || "zip command failed");
@@ -262,6 +267,13 @@ export class ProjectExportService {
       throw new Error("project_not_found");
     }
     return project;
+  }
+
+  private async getExportTimeoutMs(): Promise<number> {
+    const result = await this.database.pool.query<ExportTimeoutRow>(
+      "select export_timeout_seconds from app_settings where id = true"
+    );
+    return (result.rows[0]?.export_timeout_seconds ?? 1800) * 1000;
   }
 
   private assertProjectPath(path: string): void {

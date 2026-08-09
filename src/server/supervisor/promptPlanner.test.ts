@@ -17,6 +17,42 @@ describe("planNextWorkerPrompt", () => {
     expect(prompt.lifecycleArea).toBeNull();
   });
 
+  it("may answer with a single option letter from structured worker output", () => {
+    const prompt = planNextWorkerPrompt(
+      project({
+        latestWorkerResponse: JSON.stringify({
+          taskType: "implementation",
+          summary: "Done",
+          changedFiles: [],
+          verification: "T1 pass",
+          blockers: [],
+          nextActions: [],
+          suggestedOptions: [
+            { option: "B", prompt: "Review the implementation" },
+            { option: "C", prompt: "Run tests" }
+          ]
+        })
+      })
+    );
+
+    expect(prompt.prompt).toBe("B");
+    expect(prompt.source).toBe("worker_option");
+    expect(prompt.wordCount).toBe(1);
+  });
+
+  it("can read option-prefixed next actions from structured worker output", () => {
+    const prompt = planNextWorkerPrompt(
+      project({
+        latestWorkerResponse: JSON.stringify({
+          nextActions: ["C. Run focused verification"]
+        })
+      })
+    );
+
+    expect(prompt.prompt).toBe("C");
+    expect(prompt.source).toBe("worker_option");
+  });
+
   it("keeps generated worker prompts under 300 words", () => {
     const prompt = planNextWorkerPrompt(
       project({

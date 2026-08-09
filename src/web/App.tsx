@@ -377,13 +377,20 @@ type ProjectDetail = ProjectSummary & {
   }>;
   recentExports: Array<{
     id: string;
+    projectId: string;
     status: "queued" | "running" | "ready" | "failed" | "expired" | "deleted";
+    exportType: "full_project_archive";
+    includeIgnoredFiles: boolean;
+    includeKeystores: boolean;
     artifactId: string | null;
     fileCount: number | null;
     sizeBytes: number | null;
+    sha256: string | null;
     errorSummary: string | null;
     requestedAt: string;
+    startedAt: string | null;
     finishedAt: string | null;
+    expiresAt: string | null;
   }>;
   finalStatusSummary: string;
 };
@@ -1873,8 +1880,16 @@ function ProjectDetailPanel({
             {project.recentExports.slice(0, 6).map((record) => (
               <div className="mini-row" key={record.id}>
                 <span>{record.status}</span>
-                <span>{record.fileCount ?? "-"} files</span>
-                <span>{record.errorSummary ?? record.finishedAt ?? record.requestedAt}</span>
+                <span title={record.sha256 ?? "No checksum"}>
+                  {record.fileCount ?? "-"} files · {record.sha256?.slice(0, 12) ?? "no sha"}
+                </span>
+                {record.status === "ready" ? (
+                  <a href={`/api/project-exports/${record.id}/download`}>
+                    ZIP · expires {record.expiresAt ?? "unknown"}
+                  </a>
+                ) : (
+                  <span>{record.errorSummary ?? record.finishedAt ?? record.requestedAt}</span>
+                )}
               </div>
             ))}
             {project.recentExports.length === 0 ? (
