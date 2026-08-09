@@ -478,6 +478,32 @@ alter table codex_compatibility_reviews
 create index if not exists idx_codex_compatibility_reviews_created
   on codex_compatibility_reviews(created_at desc);
 `
+  },
+  {
+    id: "0005_toolchain_install_runs",
+    description: "Track Android toolchain installer runs",
+    sql: `
+create table if not exists toolchain_install_runs (
+  id uuid primary key,
+  status text not null check (status in ('not_started', 'running', 'succeeded', 'failed')),
+  install_root text not null,
+  android_home text not null,
+  gradle_home text not null,
+  avd_home text not null,
+  steps jsonb not null default '[]'::jsonb,
+  resolved_versions jsonb not null default '{}'::jsonb,
+  verification jsonb not null default '[]'::jsonb,
+  snapshot_id uuid references toolchain_snapshots(id) on delete set null,
+  artifact_id uuid references artifacts(id) on delete set null,
+  error_summary text,
+  started_at timestamptz not null,
+  finished_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists idx_toolchain_install_runs_started
+  on toolchain_install_runs(started_at desc);
+`
   }
 ];
 
@@ -492,6 +518,7 @@ export const expectedMvpTables = [
   "project_version_state",
   "toolchain_snapshots",
   "project_toolchain_snapshots",
+  "toolchain_install_runs",
   "runs",
   "jobs",
   "resource_checks",
@@ -526,5 +553,6 @@ export const expectedMvpIndexes = [
   "idx_verification_project_created",
   "idx_market_research_project_source",
   "idx_progress_gates_project_status",
-  "idx_codex_compatibility_reviews_created"
+  "idx_codex_compatibility_reviews_created",
+  "idx_toolchain_install_runs_started"
 ] as const;

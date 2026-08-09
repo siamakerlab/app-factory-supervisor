@@ -11,6 +11,8 @@ import { registerFail2banRoutes } from "./security/fail2ban/routes.js";
 import { registerSetupRoutes } from "./setup/routes.js";
 import { SetupService } from "./setup/service.js";
 import { SettingsService } from "./settings/service.js";
+import { registerToolchainRoutes } from "./toolchain/routes.js";
+import { ToolchainService } from "./toolchain/service.js";
 
 const config = loadConfig();
 const database = createDatabase(config);
@@ -22,6 +24,7 @@ const authService = new AuthService(database, config);
 const setupService = new SetupService(database, config);
 const codexCompatibilityService = new CodexCompatibilityService(database, config);
 const codexDocsIndexService = new CodexDocsIndexService(database, config);
+const toolchainService = new ToolchainService(database, config);
 const server = await buildServer({
   readiness,
   authService,
@@ -30,6 +33,7 @@ const server = await buildServer({
 registerFail2banRoutes(server, database);
 registerSetupRoutes(server, setupService);
 registerCodexRoutes(server, codexCompatibilityService, codexDocsIndexService);
+registerToolchainRoutes(server, toolchainService);
 
 await ensureRuntimeDirectories(getRuntimePaths(config));
 await runMigrations(database);

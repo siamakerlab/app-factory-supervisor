@@ -127,6 +127,41 @@ type CodexDocsIndexResponse = {
   indexedAt: string | null;
 };
 
+type ToolchainResponse = {
+  status: "not_started" | "running" | "succeeded" | "failed";
+  installRoot: string;
+  androidHome: string;
+  gradleHome: string;
+  avdHome: string;
+  steps: Array<{
+    id: string;
+    label: string;
+    status: "pending" | "running" | "pass" | "fail" | "skipped";
+    output: string;
+  }>;
+  resolvedVersions: Record<string, string | null>;
+  verification: Array<{
+    id: string;
+    label: string;
+    status: "pending" | "running" | "pass" | "fail" | "skipped";
+    output: string;
+  }>;
+  latestSnapshot: {
+    id: string;
+    snapshotName: string;
+    androidPlatformVersion: string;
+    androidBuildToolsVersion: string;
+    gradleVersion: string;
+    jdkVersion: string;
+    emulatorImage: string | null;
+    createdAt: string;
+  } | null;
+  artifactPath: string | null;
+  errorSummary: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
 type SetupStatus = {
   adminConfigured: boolean;
   setupComplete: boolean;
@@ -222,9 +257,11 @@ export function App() {
     null
   );
   const [codexDocs, setCodexDocs] = useState<CodexDocsIndexResponse | null>(null);
+  const [toolchain, setToolchain] = useState<ToolchainResponse | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [codexReviewBusy, setCodexReviewBusy] = useState(false);
   const [codexDocsBusy, setCodexDocsBusy] = useState(false);
+  const [toolchainBusy, setToolchainBusy] = useState(false);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -254,13 +291,26 @@ export function App() {
       }
       setSession((await sessionResponse.json()) as SessionResponse);
 
-      const [settingsResponse, fail2banResponse, codexResponse, codexDocsResponse] = await Promise.all([
+      const [
+        settingsResponse,
+        fail2banResponse,
+        codexResponse,
+        codexDocsResponse,
+        toolchainResponse
+      ] = await Promise.all([
         fetch("/api/settings", { credentials: "include" }),
         fetch("/api/security/fail2ban", { credentials: "include" }),
         fetch("/api/codex/compatibility", { credentials: "include" }),
-        fetch("/api/codex/docs", { credentials: "include" })
+        fetch("/api/codex/docs", { credentials: "include" }),
+        fetch("/api/toolchain/status", { credentials: "include" })
       ]);
-      if (!settingsResponse.ok || !fail2banResponse.ok || !codexResponse.ok || !codexDocsResponse.ok) {
+      if (
+        !settingsResponse.ok ||
+        !fail2banResponse.ok ||
+        !codexResponse.ok ||
+        !codexDocsResponse.ok ||
+        !toolchainResponse.ok
+      ) {
         setApiState("error");
         return;
       }
@@ -268,6 +318,7 @@ export function App() {
       setFail2ban((await fail2banResponse.json()) as Fail2banResponse);
       setCodexCompatibility((await codexResponse.json()) as CodexCompatibilityResponse);
       setCodexDocs((await codexDocsResponse.json()) as CodexDocsIndexResponse);
+      setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       setApiState("ready");
     } catch {
       setApiState("error");
@@ -308,6 +359,23 @@ export function App() {
     }
   }
 
+  async function runToolchainInstall() {
+    setToolchainBusy(true);
+    try {
+      const response = await fetch("/api/toolchain/install", {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        setToolchain((await response.json()) as ToolchainResponse);
+      } else {
+        setApiState("error");
+      }
+    } finally {
+      setToolchainBusy(false);
+    }
+  }
+
   const readiness = useMemo<KeyValueRows>(
     () => [
       ["Authentication", apiState === "ready" ? "Signed in" : statusLabel(apiState)],
@@ -318,8 +386,8 @@ export function App() {
     [apiState]
   );
   const buildEnvironmentRows = useMemo<KeyValueRows>(
-    () => createBuildRows(codexCompatibility, codexDocs),
-    [codexCompatibility, codexDocs]
+    () => createBuildRows(codexCompatibility, codexDocs, toolchain),
+    [codexCompatibility, codexDocs, toolchain]
   );
 
   return (
@@ -419,6 +487,13 @@ export function App() {
               <div className="button-row">
                 <button
                   type="button"
+                  disabled={apiState !== "ready" || toolchainBusy}
+                  onClick={() => void runToolchainInstall()}
+                >
+                  {toolchainBusy ? "Installing" : "Install Tools"}
+                </button>
+                <button
+                  type="button"
                   disabled={apiState !== "ready" || codexDocsBusy}
                   onClick={() => void runCodexDocsIndex()}
                 >
@@ -493,6 +568,7 @@ export function App() {
                 fail2ban,
                 codexCompatibility,
                 codexDocs,
+                toolchain,
                 buildEnvironmentRows,
                 apiState
               )}
@@ -689,6 +765,7 @@ function renderSettingsTab(
   fail2ban: Fail2banResponse | null,
   codexCompatibility: CodexCompatibilityResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
+  toolchain: ToolchainResponse | null,
   buildEnvironmentRows: KeyValueRows,
   apiState: "loading" | "ready" | "auth" | "setup" | "error"
 ) {
@@ -727,6 +804,24 @@ function renderSettingsTab(
       return (
         <div className="settings-stack">
           <SettingsGroup title="Build Environment" rows={buildEnvironmentRows} />
+          <SettingsGroup
+            title="Android Toolchain"
+            rows={[
+              ["Install status", toolchain?.status ?? "not_started"],
+              ["Install root", toolchain?.installRoot ?? "Unavailable"],
+              ["Android home", toolchain?.androidHome ?? "Unavailable"],
+              ["Gradle home", toolchain?.gradleHome ?? "Unavailable"],
+              ["AVD home", toolchain?.avdHome ?? "Unavailable"],
+              ["Latest snapshot", toolchain?.latestSnapshot?.snapshotName ?? "None"],
+              ["Android platform", toolchain?.latestSnapshot?.androidPlatformVersion ?? "Unknown"],
+              ["Build tools", toolchain?.latestSnapshot?.androidBuildToolsVersion ?? "Unknown"],
+              ["Gradle", toolchain?.latestSnapshot?.gradleVersion ?? "Unknown"],
+              ["JDK", toolchain?.latestSnapshot?.jdkVersion ?? "Unknown"],
+              ["AVD/emulator", toolchain?.latestSnapshot?.emulatorImage ?? "Not verified"],
+              ["Install report", toolchain?.artifactPath ?? "Unavailable"],
+              ["Error summary", toolchain?.errorSummary ?? "None"]
+            ]}
+          />
           <SettingsGroup
             title="Codex Compatibility Review"
             rows={[
@@ -832,14 +927,16 @@ function renderSettingsTab(
 
 function createBuildRows(
   codexCompatibility: CodexCompatibilityResponse | null,
-  codexDocs: CodexDocsIndexResponse | null
+  codexDocs: CodexDocsIndexResponse | null,
+  toolchain: ToolchainResponse | null
 ): KeyValueRows {
   return [
-    ["Android SDK", "Not installed"],
-    ["Gradle", "Not installed"],
-    ["JDK", "Not installed"],
-    ["Toolchain snapshots", "None"],
-    ["AVD/emulator", "Not verified"],
+    ["Android SDK", toolchain?.latestSnapshot ? toolchain.latestSnapshot.androidPlatformVersion : "Not installed"],
+    ["Gradle", toolchain?.latestSnapshot?.gradleVersion ?? "Not installed"],
+    ["JDK", toolchain?.latestSnapshot?.jdkVersion ?? "Not installed"],
+    ["Toolchain snapshots", toolchain?.latestSnapshot ? toolchain.latestSnapshot.snapshotName : "None"],
+    ["AVD/emulator", toolchain?.latestSnapshot?.emulatorImage ?? "Not verified"],
+    ["Toolchain install", toolchain?.status ?? "not_started"],
     ["MCP status", "Pending setup"],
     ["Skill/agent wiring", "Pending setup"],
     ["Codex CLI/auth/JSONL", codexRuntimeLabel(codexCompatibility)],

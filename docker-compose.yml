@@ -12,6 +12,10 @@ services:
       APP_PROJECTS_DIR: /app/projects
       WEB_DIST_DIR: /app/dist/web
       AUTH_LOG_PATH: /app/data/logs/auth.log
+      TOOLCHAIN_ROOT: /app/data/toolchains
+      ANDROID_HOME: /app/data/toolchains/android-sdk
+      ANDROID_SDK_ROOT: /app/data/toolchains/android-sdk
+      ANDROID_AVD_HOME: /app/data/toolchains/avd
       TRUST_PROXY: "false"
       SESSION_COOKIE_NAME: afs_session
       SESSION_COOKIE_SECURE: "false"
