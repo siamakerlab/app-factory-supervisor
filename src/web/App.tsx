@@ -1077,6 +1077,18 @@ export function App() {
     );
   }
 
+  if (apiState === "setup" && setup && !setup.adminConfigured) {
+    return (
+      <AuthScreen>
+        <InitialAdminSetupPanel
+          onConfigured={() => {
+            void loadApiState();
+          }}
+        />
+      </AuthScreen>
+    );
+  }
+
   if (apiState === "loading") {
     return (
       <AuthScreen>
@@ -1640,6 +1652,21 @@ function LoginPanel({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
+function InitialAdminSetupPanel({ onConfigured }: { onConfigured: () => void }) {
+  const [busy, setBusy] = useState<"admin" | "environment" | "ssh" | null>(null);
+
+  return (
+    <section className="panel login-panel">
+      <div className="panel-heading">
+        <h2>Create Admin Account</h2>
+        <LockKeyhole size={18} />
+      </div>
+      <p className="muted-copy">No admin account exists yet. Create the single admin account first.</p>
+      <CreateAdminForm busy={busy === "admin"} setBusy={setBusy} onReload={onConfigured} />
+    </section>
+  );
+}
+
 function ProjectDetailPanel({
   project,
   exportBusy,
@@ -2145,12 +2172,20 @@ function CreateAdminForm({
     <form className="settings-form" onSubmit={(event) => void submitAdmin(event)}>
       <label>
         <span>Admin ID</span>
-        <input value={adminId} onChange={(event) => setAdminId(event.target.value)} />
+        <input
+          autoComplete="username"
+          minLength={3}
+          required
+          value={adminId}
+          onChange={(event) => setAdminId(event.target.value)}
+        />
       </label>
       <label>
         <span>Password</span>
         <input
           autoComplete="new-password"
+          minLength={12}
+          required
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -2160,6 +2195,8 @@ function CreateAdminForm({
         <span>Confirm password</span>
         <input
           autoComplete="new-password"
+          minLength={12}
+          required
           type="password"
           value={passwordConfirmation}
           onChange={(event) => setPasswordConfirmation(event.target.value)}
