@@ -356,6 +356,7 @@ export class ProjectService {
       input.projectType === "existing"
         ? await this.cloneExisting(input.repositoryUrl, projectDir, gitHome)
         : await this.initializeNewRepository(input.repositoryUrl, projectDir, gitHome);
+    await ensureProjectSensitiveGitignore(projectDir);
     const status: ProjectStatus = gitStatus.remoteReachable ? "running" : "blocked_needs_user";
     const firstSupervisorPrompt = initialSupervisorPrompt(input);
     const keystore =
@@ -920,7 +921,7 @@ export class ProjectService {
     ];
     await writeFile(
       join(projectDir, ".gitignore"),
-      ["keystores/", "*.jks", "*.keystore", "signing.properties", ""].join("\n"),
+      sensitiveGitignoreLines().join("\n"),
       "utf8"
     );
     const reachability = await runCommand("git", ["ls-remote", repositoryUrl], {
@@ -1217,6 +1218,22 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function ensureProjectSensitiveGitignore(projectDir: string): Promise<void> {
+  const gitignorePath = join(projectDir, ".gitignore");
+  const existing = (await readFile(gitignorePath, "utf8").catch(() => "")).split(/\r?\n/);
+  const merged = [...existing];
+  for (const line of sensitiveGitignoreLines()) {
+    if (line.length > 0 && !merged.includes(line)) {
+      merged.push(line);
+    }
+  }
+  await writeFile(gitignorePath, `${merged.filter((line, index) => line.length > 0 || index < merged.length - 1).join("\n")}\n`, "utf8");
+}
+
+function sensitiveGitignoreLines(): string[] {
+  return ["keystores/", "*.jks", "*.keystore", "signing.properties", "*.p12", "*.pem", ""];
 }
 
 function runCommand(

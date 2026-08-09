@@ -87,6 +87,7 @@ export const lifecyclePromptTemplates: Record<LifecyclePromptArea, LifecycleProm
       [
         `Implement one scoped roadmap item: ${gate?.label ?? "next implementation task"}.`,
         "Touch only necessary files/areas and keep the task coherent.",
+        "Confirm keystores, signing properties, passwords, and secrets stay ignored before any commit.",
         "Acceptance: changed files, build/test or targeted verification, blockers, and A-G next options."
       ].join(" ")
   },
@@ -134,6 +135,7 @@ export const lifecyclePromptTemplates: Record<LifecyclePromptArea, LifecycleProm
       [
         `Review code for ${project.appName}.`,
         "Cover architecture, data layer, state management, coroutine/Flow, errors, permissions/privacy, secrets, performance, release packaging, R8/ProGuard, dependencies, policy, and LGPL compliance.",
+        "Confirm project .gitignore protects keystores, signing properties, passwords, and secret files.",
         "Acceptance: findings with files, fixes if scoped, verification, blockers, and A-G next options."
       ].join(" ")
   },

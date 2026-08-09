@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z, ZodError } from "zod";
 
+import { assertNoSecrets, SecretLeakError } from "../../security/secretScanner.js";
 import type { CodexRunnerService } from "./service.js";
 
 const runCodexSchema = z.object({
@@ -19,6 +20,7 @@ export function registerCodexRunnerRoutes(
     try {
       const body = runCodexSchema.parse(request.body);
       validateWorkerPromptLimit(body);
+      assertNoSecrets(body.prompt);
       return await codexRunnerService.buildCommand(body);
     } catch (error) {
       return handleRunnerError(error, reply);
@@ -29,6 +31,7 @@ export function registerCodexRunnerRoutes(
     try {
       const body = runCodexSchema.parse(request.body);
       validateWorkerPromptLimit(body);
+      assertNoSecrets(body.prompt);
       return await codexRunnerService.run(body);
     } catch (error) {
       return handleRunnerError(error, reply);
@@ -61,6 +64,12 @@ function handleRunnerError(error: unknown, reply: FastifyReply) {
     return reply.code(400).send({
       error: "worker_prompt_word_limit_exceeded",
       limitWords: 300
+    });
+  }
+  if (error instanceof SecretLeakError) {
+    return reply.code(400).send({
+      error: "secret_leak_detected",
+      findings: error.findings.map((finding) => finding.kind)
     });
   }
   throw error;

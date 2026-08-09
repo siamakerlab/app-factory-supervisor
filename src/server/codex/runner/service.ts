@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { AppConfig } from "../../config.js";
 import type { Database } from "../../db/client.js";
 import { getRuntimePaths } from "../../runtime/paths.js";
+import { redactSecrets } from "../../security/secretScanner.js";
 import { summarizeCodexJsonl } from "../jsonl.js";
 
 export type CodexRunRole = "supervisor" | "worker";
@@ -170,11 +171,26 @@ export class CodexRunnerService {
 
     const timeoutMs = await this.codexTurnTimeoutMs();
     const execution = await runProcess({ ...command, timeoutMs });
-    const jsonl = await readText(command.jsonlPath);
-    const stderr = await readText(command.stderrPath);
+    const rawJsonl = await readText(command.jsonlPath);
+    const rawStderr = await readText(command.stderrPath);
+    const redactedJsonl = redactSecrets(rawJsonl);
+    const redactedStderr = redactSecrets(rawStderr);
+    if (redactedJsonl.findings.length > 0) {
+      await writeFile(command.jsonlPath, redactedJsonl.redacted, "utf8");
+    }
+    if (redactedStderr.findings.length > 0) {
+      await writeFile(command.stderrPath, redactedStderr.redacted, "utf8");
+    }
+    const jsonl = redactedJsonl.redacted;
+    const stderr = redactedStderr.redacted;
     const jsonSummary = summarizeCodexJsonl(jsonl);
+    const outputLastMessage = await readText(command.lastMessagePath);
+    const redactedLastMessage = redactSecrets(outputLastMessage);
+    if (redactedLastMessage.findings.length > 0) {
+      await writeFile(command.lastMessagePath, redactedLastMessage.redacted, "utf8");
+    }
     const finalMessage =
-      (await readText(command.lastMessagePath)) ||
+      redactedLastMessage.redacted ||
       jsonSummary.finalMessage ||
       fallbackFinalMessage(execution, stderr);
     const status = execution.exitCode === 0 ? "succeeded" : "failed";
@@ -187,9 +203,12 @@ export class CodexRunnerService {
           eventCategories: jsonSummary.eventCategories,
           tokenUsage: jsonSummary.tokenUsage,
           failedCommands: jsonSummary.failedCommands,
-          schemaVersionSensitive: jsonSummary.schemaVersionSensitive
+          schemaVersionSensitive: jsonSummary.schemaVersionSensitive,
+          redactedSecretFindings: redactedJsonl.findings.map((finding) => finding.kind)
         }),
-        this.insertArtifact(input.projectId, runId, "codex_stderr", command.stderrPath, false),
+        this.insertArtifact(input.projectId, runId, "codex_stderr", command.stderrPath, false, {
+          redactedSecretFindings: redactedStderr.findings.map((finding) => finding.kind)
+        }),
         this.writeAndInsertFinalMessage(input.projectId, runId, command.lastMessagePath, finalMessage)
       ]);
 
