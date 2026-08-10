@@ -14,6 +14,7 @@ import {
   KeyRound,
   LogOut,
   LockKeyhole,
+  Play,
   ServerCog,
   Settings,
   Shield,
@@ -583,6 +584,7 @@ export function App() {
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [completionGate, setCompletionGate] = useState<CompletionGateResponse | null>(null);
   const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+  const [projectNotice, setProjectNotice] = useState<string | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "auth" | "setup" | "error">(
     "loading"
   );
@@ -723,7 +725,11 @@ export function App() {
       setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
       const loadedProjects = ((await projectsResponse.json()) as ProjectsResponse).projects;
       setProjects(loadedProjects);
-      setSelectedProjectId((current) => current ?? loadedProjects[0]?.id ?? null);
+      setSelectedProjectId((current) =>
+        loadedProjects.some((project) => project.id === current)
+          ? current
+          : loadedProjects[0]?.id ?? null
+      );
       setArtifacts(((await artifactsResponse.json()) as ArtifactsResponse).artifacts);
       setProjectExports(((await exportsResponse.json()) as ProjectExportsResponse).exports);
       setJobsStatus((await jobsResponse.json()) as JobsStatusResponse);
@@ -788,6 +794,11 @@ export function App() {
       return;
     }
     setProjectDetail((await response.json()) as ProjectDetail);
+  }
+
+  async function selectProject(projectId: string) {
+    setSelectedProjectId(projectId);
+    await loadProjectDetail(projectId);
   }
 
   async function updateChecklistItem(
@@ -861,7 +872,9 @@ export function App() {
 
   async function startProjectRun(projectId: string) {
     setRunBusyProjectId(projectId);
+    setProjectNotice(null);
     try {
+      setSelectedProjectId(projectId);
       const response = await fetch(`/api/projects/${projectId}/run/start`, {
         method: "POST",
         credentials: "include"
@@ -873,6 +886,7 @@ export function App() {
       await response.json();
       await loadApiState();
       await loadProjectDetail(projectId);
+      setProjectNotice("Autopilot started. Supervisor and worker turns will continue automatically.");
     } finally {
       setRunBusyProjectId(null);
     }
@@ -1452,12 +1466,21 @@ export function App() {
               {projectWizardOpen ? (
                 <ProjectWizard
                   settings={settings}
-                  onCreated={() => {
+                  onCreated={(created) => {
                     setProjectWizardOpen(false);
-                    void loadApiState();
+                    setProjectNotice(
+                      created.keystore.created
+                        ? "Project created. Release keystore generated. Use Start Autopilot to run all remaining work."
+                        : "Project created. Keystore still needs user action. Use Start Autopilot when ready."
+                    );
+                    void (async () => {
+                      await loadApiState();
+                      await selectProject(created.id);
+                    })();
                   }}
                 />
               ) : null}
+              {projectNotice ? <p className="status-banner">{projectNotice}</p> : null}
               <div className="table">
                 <div className="table-row table-head">
                   <span>Project</span>
@@ -1506,7 +1529,19 @@ export function App() {
                       {project.status}
                     </span>
                     <span>
-                      <button type="button" onClick={() => setSelectedProjectId(project.id)}>
+                      <button
+                        type="button"
+                        disabled={runBusyProjectId === project.id}
+                        onClick={() => void startProjectRun(project.id)}
+                      >
+                        <Play size={13} />
+                        {runBusyProjectId === project.id
+                          ? "Starting"
+                          : project.status === "running"
+                            ? "Running"
+                            : "Start"}
+                      </button>
+                      <button type="button" onClick={() => void selectProject(project.id)}>
                         Detail
                       </button>
                       <button
@@ -2422,7 +2457,12 @@ function ProjectWizard({
   onCreated
 }: {
   settings: PublicSettings | null;
-  onCreated: () => void;
+  onCreated: (
+    project: ProjectSummary & {
+      gitStatus: { remoteReachable: boolean };
+      keystore: { created: boolean; path: string | null };
+    }
+  ) => void;
 }) {
   const [projectName, setProjectName] = useState("");
   const [appName, setAppName] = useState("");
@@ -2470,7 +2510,7 @@ function ProjectWizard({
     }
     const created = (await response.json()) as ProjectSummary & {
       gitStatus: { remoteReachable: boolean };
-      keystore: { created: boolean };
+      keystore: { created: boolean; path: string | null };
     };
     setStatus("saved");
     setMessage(
@@ -2478,7 +2518,7 @@ function ProjectWizard({
         ? "Project created and Git remote verified."
         : "Project created, but Git access needs user action before automation can run."
     );
-    onCreated();
+    onCreated(created);
   }
 
   return (
@@ -2506,6 +2546,19 @@ function ProjectWizard({
             <option value="existing">Existing project</option>
           </select>
         </label>
+        <div className="wizard-callout wide-field">
+          <div>
+            <KeyRound size={18} />
+          </div>
+          <div>
+            <strong>Release keystore</strong>
+            <span>
+              {projectType === "new"
+                ? "A keystores/release.jks file is generated during creation. Passwords are stored in the app secret store and keystores are ignored by Git."
+                : "Existing projects keep this as a user-required checklist item until the release keystore is uploaded or marked provided."}
+            </span>
+          </div>
+        </div>
         <label className="wide-field">
           <span>{projectType === "new" ? "Empty repository URL" : "Existing repository URL"}</span>
           <input value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} />
@@ -2555,7 +2608,11 @@ function ProjectWizard({
       </div>
       <div className="form-actions">
         <button type="submit" disabled={status === "saving"}>
-          {status === "saving" ? "Creating" : "Create Project"}
+          {status === "saving"
+            ? "Creating"
+            : projectType === "new"
+              ? "Create Project + Keystore"
+              : "Create Project"}
         </button>
         <span>{message}</span>
       </div>
