@@ -12,7 +12,7 @@ type CapabilityType = "mcp" | "skill" | "agent";
 type SourceType = "bundled" | "repository" | "user";
 type CapabilityStatus = "configured" | "missing" | "optional_disabled" | "conflict";
 type InstallRunStatus = "not_started" | "running" | "succeeded" | "failed";
-type InstallStepStatus = "pending" | "pass" | "fail" | "skipped";
+type InstallStepStatus = "pending" | "running" | "pass" | "fail" | "skipped";
 
 export type CapabilityDefinition = {
   type: CapabilityType;
@@ -115,12 +115,18 @@ export const defaultCapabilities: CapabilityDefinition[] = [
     npmPackage: "@playwright/mcp",
     packageVersion: "0.0.79"
   }),
-  mcp("memory", "repository", "https://github.com/modelcontextprotocol/servers/tree/main/src/memory", true, {
-    command: "mcp-server-memory",
-    args: [],
-    npmPackage: "@modelcontextprotocol/server-memory",
-    packageVersion: "2026.7.4"
-  }),
+  mcp(
+    "memory",
+    "repository",
+    "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+    true,
+    {
+      command: "mcp-server-memory",
+      args: [],
+      npmPackage: "@modelcontextprotocol/server-memory",
+      packageVersion: "2026.7.4"
+    }
+  ),
   mcp("time", "repository", "https://github.com/guanxiong-shen/mcp-server-time", true, {
     command: "mcp-server-time",
     args: [],
@@ -193,17 +199,23 @@ export const defaultCapabilities: CapabilityDefinition[] = [
 ];
 
 export class CapabilityService {
+  private readonly processStartedAt = new Date();
+  private readonly activeRunIds = new Set<string>();
+
   constructor(
     private readonly database: Database,
     private readonly config: AppConfig
   ) {}
 
   async getStatus(): Promise<CapabilityStatusResponse> {
+    await this.markInterruptedRuns();
     const [run, rows] = await Promise.all([this.getLatestRun(), this.getCapabilityRows()]);
     const paths = this.getPaths();
     const capabilities = mergeDefinitions(rows);
     const requiredCount = capabilities.filter((capability) => capability.required).length;
-    const installedCount = capabilities.filter((capability) => capability.status === "configured").length;
+    const installedCount = capabilities.filter(
+      (capability) => capability.status === "configured"
+    ).length;
     const missingRequiredCount = capabilities.filter(
       (capability) => capability.required && capability.status !== "configured"
     ).length;
@@ -213,9 +225,9 @@ export class CapabilityService {
       status: run?.status ?? "not_started",
       capabilitiesRoot: run?.capabilities_root ?? paths.capabilitiesRoot,
       codexConfigPath: run?.config_path ?? paths.configPath,
-      requiredCount: run?.required_count ?? requiredCount,
-      installedCount: run?.installed_count ?? installedCount,
-      missingRequiredCount: run?.missing_required_count ?? missingRequiredCount,
+      requiredCount,
+      installedCount,
+      missingRequiredCount,
       conflictSummary: run?.conflict_summary ?? null,
       appManagedConfigPresent: await hasManagedConfig(paths.configPath),
       capabilities,
@@ -239,6 +251,7 @@ export class CapabilityService {
     const runId = randomUUID();
     const steps = createSteps();
     await this.insertRun(runId, "running", paths, steps);
+    this.activeRunIds.add(runId);
 
     const completedSteps: CapabilityInstallStep[] = [];
     const recordStep = async (
@@ -250,6 +263,17 @@ export class CapabilityService {
         throw new Error(`unknown capability install step: ${id}`);
       }
       const startedAt = new Date().toISOString();
+      const runningStep = {
+        ...step,
+        status: "running" as const,
+        output: `Started ${step.label}.`,
+        startedAt,
+        finishedAt: null
+      };
+      await this.updateRunSteps(
+        runId,
+        completedSteps.concat(runningStep, steps.slice(completedSteps.length + 1))
+      );
       try {
         const output = await fn();
         return {
@@ -270,57 +294,66 @@ export class CapabilityService {
       }
     };
 
-    for (const [id, fn] of [
-      ["write-capability-records", () => this.writeCapabilityRecords()],
-      ["install-required-mcps", () => this.installRequiredMcps()],
-      ["wire-bundled-capabilities", () => this.wireBundledCapabilities(paths)],
-      ["write-codex-config", () => this.writeCodexConfig(paths)],
-      ["validate-capabilities", () => this.validateCapabilities()]
-    ] as const) {
-      const completed = await recordStep(id, fn);
-      completedSteps.push(completed);
-      await this.updateRunSteps(runId, completedSteps.concat(steps.slice(completedSteps.length)));
-      if (completed.status === "fail") {
-        break;
+    try {
+      for (const [id, fn] of [
+        ["write-capability-records", () => this.writeCapabilityRecords()],
+        ["install-required-mcps", () => this.installRequiredMcps()],
+        ["wire-bundled-capabilities", () => this.wireBundledCapabilities(paths)],
+        ["write-codex-config", () => this.writeCodexConfig(paths)],
+        ["validate-capabilities", () => this.validateCapabilities()]
+      ] as const) {
+        const completed = await recordStep(id, fn);
+        completedSteps.push(completed);
+        await this.updateRunSteps(runId, completedSteps.concat(steps.slice(completedSteps.length)));
+        if (completed.status === "fail") {
+          break;
+        }
       }
+
+      const rows = await this.getCapabilityRows();
+      const capabilities = mergeDefinitions(rows);
+      const requiredCount = capabilities.filter((capability) => capability.required).length;
+      const installedCount = capabilities.filter(
+        (capability) => capability.status === "configured"
+      ).length;
+      const missingRequired = capabilities.filter(
+        (capability) => capability.required && capability.status !== "configured"
+      );
+      const failedStep = completedSteps.find((step) => step.status === "fail");
+      const status: InstallRunStatus =
+        failedStep || missingRequired.length > 0 ? "failed" : "succeeded";
+      const conflictSummary = capabilities.some((capability) => capability.status === "conflict")
+        ? "Capability ownership conflict detected"
+        : null;
+
+      const reportPath = join(paths.artifactsDir, "capability-install-report.md");
+      await writeFile(
+        reportPath,
+        renderReport(status, capabilities, completedSteps, paths.configPath, conflictSummary),
+        "utf8"
+      );
+      const artifactId = await this.insertArtifact("capability_install_report", reportPath, {
+        status,
+        requiredCount,
+        installedCount,
+        missingRequiredCount: missingRequired.length
+      });
+      await this.finishRun(runId, {
+        status,
+        steps: completedSteps.concat(
+          steps
+            .slice(completedSteps.length)
+            .map((step) => ({ ...step, status: "skipped" as const }))
+        ),
+        requiredCount,
+        installedCount,
+        missingRequiredCount: missingRequired.length,
+        conflictSummary,
+        artifactId
+      });
+    } finally {
+      this.activeRunIds.delete(runId);
     }
-
-    const rows = await this.getCapabilityRows();
-    const capabilities = mergeDefinitions(rows);
-    const requiredCount = capabilities.filter((capability) => capability.required).length;
-    const installedCount = capabilities.filter((capability) => capability.status === "configured").length;
-    const missingRequired = capabilities.filter(
-      (capability) => capability.required && capability.status !== "configured"
-    );
-    const failedStep = completedSteps.find((step) => step.status === "fail");
-    const status: InstallRunStatus = failedStep || missingRequired.length > 0 ? "failed" : "succeeded";
-    const conflictSummary = capabilities.some((capability) => capability.status === "conflict")
-      ? "Capability ownership conflict detected"
-      : null;
-
-    const reportPath = join(paths.artifactsDir, "capability-install-report.md");
-    await writeFile(
-      reportPath,
-      renderReport(status, capabilities, completedSteps, paths.configPath, conflictSummary),
-      "utf8"
-    );
-    const artifactId = await this.insertArtifact("capability_install_report", reportPath, {
-      status,
-      requiredCount,
-      installedCount,
-      missingRequiredCount: missingRequired.length
-    });
-    await this.finishRun(runId, {
-      status,
-      steps: completedSteps.concat(
-        steps.slice(completedSteps.length).map((step) => ({ ...step, status: "skipped" as const }))
-      ),
-      requiredCount,
-      installedCount,
-      missingRequiredCount: missingRequired.length,
-      conflictSummary,
-      artifactId
-    });
 
     return this.getStatus();
   }
@@ -376,11 +409,17 @@ export class CapabilityService {
     return `Registered ${defaultCapabilities.length} default capabilities.`;
   }
 
-  private async wireBundledCapabilities(paths: ReturnType<CapabilityService["getPaths"]>): Promise<string> {
+  private async wireBundledCapabilities(
+    paths: ReturnType<CapabilityService["getPaths"]>
+  ): Promise<string> {
     const bundled = defaultCapabilities.filter((capability) => capability.sourceType === "bundled");
     for (const capability of bundled) {
       const targetDir = capability.type === "agent" ? paths.agentsDir : paths.skillsDir;
-      const manifestPath = join(targetDir, capability.id, capability.type === "agent" ? "AGENT.md" : "SKILL.md");
+      const manifestPath = join(
+        targetDir,
+        capability.id,
+        capability.type === "agent" ? "AGENT.md" : "SKILL.md"
+      );
       await mkdir(join(targetDir, capability.id), { recursive: true, mode: 0o700 });
       if (!(await fileExists(manifestPath))) {
         await writeFile(manifestPath, renderCapabilityManifest(capability), "utf8");
@@ -407,7 +446,11 @@ export class CapabilityService {
       const spec = `${config.npmPackage}@${config.packageVersion}`;
       const install = await runCommand("npm", ["install", "-g", spec], 10 * 60 * 1000);
       if (install.exitCode !== 0) {
-        await this.markCapabilityStatus(capability, "missing", install.output || `npm install -g ${spec} failed`);
+        await this.markCapabilityStatus(
+          capability,
+          "missing",
+          install.output || `npm install -g ${spec} failed`
+        );
         throw new Error(`Failed to install ${capability.id}: ${install.output || install.error}`);
       }
       const version = await runCommand(config.command, ["--version"], 30_000);
@@ -424,10 +467,14 @@ export class CapabilityService {
       });
       outputs.push(`${capability.id}: ${spec} (${config.command})`);
     }
-    return outputs.length > 0 ? `Installed required MCP packages: ${outputs.join(", ")}.` : "No MCP packages to install.";
+    return outputs.length > 0
+      ? `Installed required MCP packages: ${outputs.join(", ")}.`
+      : "No MCP packages to install.";
   }
 
-  private async writeCodexConfig(paths: ReturnType<CapabilityService["getPaths"]>): Promise<string> {
+  private async writeCodexConfig(
+    paths: ReturnType<CapabilityService["getPaths"]>
+  ): Promise<string> {
     const existing = await readTextIfExists(paths.configPath);
     const unmanagedConflict =
       existing.includes(managedStart) && !existing.includes(managedEnd)
@@ -438,7 +485,9 @@ export class CapabilityService {
       throw new Error(unmanagedConflict);
     }
 
-    const managed = renderManagedConfig(defaultCapabilities.filter((capability) => capability.type === "mcp"));
+    const managed = renderManagedConfig(
+      defaultCapabilities.filter((capability) => capability.type === "mcp")
+    );
     const next = replaceManagedSection(existing, managed);
     await writeFile(paths.configPath, next, {
       encoding: "utf8",
@@ -525,6 +574,35 @@ export class CapabilityService {
       "select * from capability_installations order by capability_type, capability_id"
     );
     return result.rows;
+  }
+
+  private async markInterruptedRuns(): Promise<void> {
+    await this.database.pool.query(
+      `
+        update capability_install_runs
+        set status = 'failed',
+            conflict_summary = coalesce(conflict_summary, 'Capability install was interrupted by app restart or container recreation. Rerun install.'),
+            steps = (
+              select jsonb_agg(
+                case
+                  when step->>'status' = 'running' then step || jsonb_build_object(
+                    'status', 'fail',
+                    'output', concat(coalesce(step->>'output', ''), E'\nInterrupted by app restart or container recreation.'),
+                    'finishedAt', to_jsonb(now())
+                  )
+                  when step->>'status' = 'pending' then step || jsonb_build_object('status', 'skipped')
+                  else step
+                end
+              )
+              from jsonb_array_elements(steps::jsonb) as step
+            )::jsonb,
+            finished_at = now()
+        where status = 'running'
+          and started_at < $1
+          and not (id = any($2::uuid[]))
+      `,
+      [this.processStartedAt, [...this.activeRunIds]]
+    );
   }
 
   private async insertRun(
@@ -681,13 +759,15 @@ function mergeDefinitions(rows: CapabilityRow[]): CapabilityRecord[] {
       version: row?.version ?? null,
       revision: row?.revision ?? null,
       lastVerifiedAt: row?.last_verified_at?.toISOString() ?? null,
-      required:
-        typeof metadata.required === "boolean" ? metadata.required : definition.required,
+      required: typeof metadata.required === "boolean" ? metadata.required : definition.required,
       installStage:
-        metadata.installStage === "wizard" || metadata.installStage === "image" || metadata.installStage === "user"
+        metadata.installStage === "wizard" ||
+        metadata.installStage === "image" ||
+        metadata.installStage === "user"
           ? metadata.installStage
           : definition.installStage,
-      description: typeof metadata.description === "string" ? metadata.description : definition.description
+      description:
+        typeof metadata.description === "string" ? metadata.description : definition.description
     };
   });
 }
@@ -752,7 +832,10 @@ function getMcpCommandConfig(capability: CapabilityDefinition): {
   const config = capability.metadata?.config;
   return {
     command:
-      typeof config === "object" && config && "command" in config && typeof config.command === "string"
+      typeof config === "object" &&
+      config &&
+      "command" in config &&
+      typeof config.command === "string"
         ? config.command
         : capability.id,
     args:
@@ -760,7 +843,10 @@ function getMcpCommandConfig(capability: CapabilityDefinition): {
         ? config.args.filter((arg): arg is string => typeof arg === "string")
         : [],
     npmPackage:
-      typeof config === "object" && config && "npmPackage" in config && typeof config.npmPackage === "string"
+      typeof config === "object" &&
+      config &&
+      "npmPackage" in config &&
+      typeof config.npmPackage === "string"
         ? config.npmPackage
         : null,
     packageVersion:
@@ -814,10 +900,12 @@ function runCommand(
 }
 
 function firstLine(value: string): string | null {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean) ?? null;
+  return (
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? null
+  );
 }
 
 function replaceManagedSection(existing: string, managed: string): string {

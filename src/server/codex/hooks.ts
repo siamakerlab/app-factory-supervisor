@@ -8,6 +8,10 @@ import type { Database } from "../db/client.js";
 import { getRuntimePaths } from "../runtime/paths.js";
 
 const managedMarker = "APP_FACTORY_SUPERVISOR_MANAGED";
+const legacyManagedMarkers = [
+  "app-factory-supervisor managed",
+  '"owner": "app-factory-supervisor"'
+];
 const appVersion = "0.1.0";
 
 type FileOwner = "app" | "user" | "missing";
@@ -75,11 +79,15 @@ export class CodexHookService {
   async installManagedHooks(force = false): Promise<CodexHookStatus> {
     const status = await this.getStatus();
     if (status.conflicts.length > 0 && !force) {
-      await this.recordAudit("codex.hooks_install_conflict", "Managed Codex hooks were not installed because user hooks exist.", {
-        configPath: status.configPath,
-        hooksPath: status.hooksPath,
-        conflicts: status.conflicts
-      });
+      await this.recordAudit(
+        "codex.hooks_install_conflict",
+        "Managed Codex hooks were not installed because user hooks exist.",
+        {
+          configPath: status.configPath,
+          hooksPath: status.hooksPath,
+          conflicts: status.conflicts
+        }
+      );
       return status;
     }
 
@@ -154,13 +162,17 @@ export class CodexHookService {
       encoding: "utf8",
       mode: 0o600
     });
-    await this.recordAudit("codex.hooks_installed", "Managed Codex hook configuration was installed.", {
-      hooksPath: status.hooksPath,
-      generatedAt,
-      appVersion,
-      codexCliVersion,
-      force
-    });
+    await this.recordAudit(
+      "codex.hooks_installed",
+      "Managed Codex hook configuration was installed.",
+      {
+        hooksPath: status.hooksPath,
+        generatedAt,
+        appVersion,
+        codexCliVersion,
+        force
+      }
+    );
     return this.getStatus();
   }
 
@@ -225,11 +237,15 @@ export class CodexHookService {
     const completedRunsResult = await this.database.pool.query<{ count: string }>(
       "select count(*) as count from runs where status in ('succeeded', 'failed') and finished_at > now() - interval '10 minutes'"
     );
-    await this.recordAudit("codex.worker_state_polled", "Active worker state was polled as Stop hook fallback.", {
-      staleJobs: staleJobsResult.rowCount ?? 0,
-      activeRuns: Number(activeRunsResult.rows[0]?.count ?? 0),
-      completedRuns: Number(completedRunsResult.rows[0]?.count ?? 0)
-    });
+    await this.recordAudit(
+      "codex.worker_state_polled",
+      "Active worker state was polled as Stop hook fallback.",
+      {
+        staleJobs: staleJobsResult.rowCount ?? 0,
+        activeRuns: Number(activeRunsResult.rows[0]?.count ?? 0),
+        completedRuns: Number(completedRunsResult.rows[0]?.count ?? 0)
+      }
+    );
     return {
       checkedAt: new Date().toISOString(),
       pollIntervalSeconds: settings.worker_poll_interval_seconds,
@@ -281,10 +297,17 @@ export class CodexHookService {
 async function detectOwner(path: string): Promise<FileOwner> {
   try {
     const content = await readFile(path, "utf8");
-    return content.includes(managedMarker) ? "app" : "user";
+    return isManagedContent(content) ? "app" : "user";
   } catch {
     return "missing";
   }
+}
+
+function isManagedContent(content: string): boolean {
+  return (
+    content.includes(managedMarker) ||
+    legacyManagedMarkers.some((marker) => content.includes(marker))
+  );
 }
 
 function readCodexCliVersion(): Promise<string | null> {

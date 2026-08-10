@@ -167,6 +167,12 @@ it may contain signing material or app credentials.
 
 ## Backup And Restore
 
+Runtime state is stored in named Docker volumes:
+`app-factory-supervisor_app_data`, `app-factory-supervisor_app_projects`, and
+`app-factory-supervisor_postgres_data`. Rebuilding the app image or recreating containers keeps this
+state. Do not use `docker compose down -v` or prune/remove these volumes unless you are intentionally
+discarding the environment.
+
 Back up all three Compose volumes together while the stack is stopped or quiescent:
 
 ```bash

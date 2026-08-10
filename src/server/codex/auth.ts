@@ -83,6 +83,18 @@ export class CodexAuthService {
     });
     session.process = child;
 
+    let resolvePromptReady: (() => void) | null = null;
+    const promptReady = new Promise<void>((resolve) => {
+      resolvePromptReady = resolve;
+    });
+    const notifyPromptReady = () => {
+      if (!resolvePromptReady) {
+        return;
+      }
+      resolvePromptReady();
+      resolvePromptReady = null;
+    };
+
     const capture = (chunk: Buffer) => {
       session.output += stripAnsi(chunk.toString("utf8"));
       const parsed = parseCodexDeviceLoginOutput(session.output);
@@ -92,6 +104,7 @@ export class CodexAuthService {
         session.expiresAt = parsed.expiresAt ?? session.expiresAt;
         session.status = "waiting_for_user";
         session.message = "Open the verification URL and enter the device code.";
+        notifyPromptReady();
       }
     };
     child.stdout.on("data", capture);
@@ -101,6 +114,7 @@ export class CodexAuthService {
       session.finishedAt = new Date().toISOString();
       session.message = error.message;
       session.process = null;
+      notifyPromptReady();
     });
     child.on("close", (exitCode) => {
       session.exitCode = exitCode;
@@ -114,10 +128,13 @@ export class CodexAuthService {
         session.message = "Codex login completed.";
       } else {
         session.status = "failed";
-        session.message = session.output.trim().slice(-1000) || `Codex login exited with ${exitCode}.`;
+        session.message =
+          session.output.trim().slice(-1000) || `Codex login exited with ${exitCode}.`;
       }
+      notifyPromptReady();
     });
 
+    await Promise.race([promptReady, delay(2_000)]);
     return this.publicLoginSession()!;
   }
 
@@ -204,7 +221,13 @@ function stripAnsi(value: string): string {
   return value.replace(ansiPattern, "");
 }
 
-function runCodexLoginStatus(env: NodeJS.ProcessEnv): Promise<{ exitCode: number | null; output: string }> {
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runCodexLoginStatus(
+  env: NodeJS.ProcessEnv
+): Promise<{ exitCode: number | null; output: string }> {
   return new Promise((resolve) => {
     let settled = false;
     const child = spawn("codex", ["login", "status"], {

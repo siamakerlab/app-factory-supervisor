@@ -22,7 +22,7 @@ const codexDocSources = [
   ["Security overview", "https://developers.openai.com/codex/security"],
   ["Sandboxing", "https://developers.openai.com/codex/sandboxing"],
   ["Approvals and security", "https://developers.openai.com/codex/agent-approvals-security"],
-  ["Internet access", "https://developers.openai.com/codex/internet-access"],
+  ["Internet access", "https://developers.openai.com/codex/cloud/internet-access"],
   ["Skills", "https://developers.openai.com/codex/build-skills"],
   ["Plugins", "https://developers.openai.com/codex/build-plugins"],
   ["Codex SDK", "https://developers.openai.com/codex/sdk"],
@@ -221,10 +221,14 @@ export class CodexDocsIndexService {
       gapReport
     });
     await writeFile(paths.codexDocsReportPath, report, "utf8");
-    const artifactId = await this.insertArtifact("codex_docs_index_report", paths.codexDocsReportPath, {
-      status,
-      indexName
-    });
+    const artifactId = await this.insertArtifact(
+      "codex_docs_index_report",
+      paths.codexDocsReportPath,
+      {
+        status,
+        indexName
+      }
+    );
     const codexCliVersion = commandSucceeded(codexVersion)
       ? firstNonEmptyLine(codexVersion.stdout || codexVersion.stderr)
       : null;
@@ -389,7 +393,9 @@ export class CodexDocsIndexService {
   ): Promise<string> {
     const artifactId = randomUUID();
     const fileStats = await stat(path);
-    const sha256 = createHash("sha256").update(await readFile(path)).digest("hex");
+    const sha256 = createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex");
     await this.database.pool.query(
       `
         insert into artifacts (id, artifact_type, path, sha256, size_bytes, redacted, metadata, created_at)
@@ -481,10 +487,12 @@ function commandSucceeded(result: CommandResult): boolean {
 }
 
 function firstNonEmptyLine(value: string): string {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean) ?? "unavailable";
+  return (
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? "unavailable"
+  );
 }
 
 function parseJson(value: string): unknown {
@@ -521,7 +529,9 @@ function renderGapReport(input: {
       ? `docs-mcp-server is unavailable: ${trim(input.docsVersion.error || input.docsVersion.stderr)}`
       : null,
     ...input.scrapeResults.map(({ title, result }) =>
-      commandSucceeded(result) ? null : `${title} scrape failed: ${trim(result.error || result.stderr)}`
+      commandSucceeded(result)
+        ? null
+        : `${title} scrape failed: ${trim(result.error || result.stderr)}`
     ),
     !commandSucceeded(input.search)
       ? `openai-codex search smoke failed: ${trim(input.search.error || input.search.stderr)}`

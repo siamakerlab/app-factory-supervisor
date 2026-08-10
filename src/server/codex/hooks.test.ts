@@ -20,8 +20,8 @@ describe("CodexHookService", () => {
     expect(status.hooksOwner).toBe("app");
     expect(status.configOwner).toBe("app");
     expect(hooks).toContain("APP_FACTORY_SUPERVISOR_MANAGED");
-    expect(hooks).toContain("\"Stop\"");
-    expect(hooks).toContain("\"SessionEnd\"");
+    expect(hooks).toContain('"Stop"');
+    expect(hooks).toContain('"SessionEnd"');
     expect(hooks).toContain("App Factory Supervisor");
     expect(hooks).toContain("codex-stop-hook");
     expect(configFile).toContain("APP_FACTORY_SUPERVISOR_MANAGED");
@@ -32,13 +32,36 @@ describe("CodexHookService", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "afs-hooks-conflict-"));
     const codexHome = join(dataDir, "codex-home");
     await mkdir(codexHome, { recursive: true });
-    await writeFile(join(codexHome, "hooks.json"), "{\"hooks\":{}}\n", "utf8");
+    await writeFile(join(codexHome, "hooks.json"), '{"hooks":{}}\n', "utf8");
     const service = new CodexHookService(fakeDatabase(), config(dataDir));
 
     const status = await service.installManagedHooks();
 
     expect(status.hooksOwner).toBe("user");
     expect(status.conflicts).toContain("hooks.json exists without app-managed marker");
+  });
+
+  it("accepts legacy app-managed markers as app-owned", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "afs-hooks-legacy-"));
+    const codexHome = join(dataDir, "codex-home");
+    await mkdir(codexHome, { recursive: true });
+    await writeFile(
+      join(codexHome, "config.toml"),
+      "# app-factory-supervisor managed\n# Owner: App Factory Supervisor\n",
+      "utf8"
+    );
+    await writeFile(
+      join(codexHome, "hooks.json"),
+      `${JSON.stringify({ description: "app-factory-supervisor managed", hooks: {} })}\n`,
+      "utf8"
+    );
+    const service = new CodexHookService(fakeDatabase(), config(dataDir));
+
+    const status = await service.getStatus();
+
+    expect(status.configOwner).toBe("app");
+    expect(status.hooksOwner).toBe("app");
+    expect(status.conflicts).toEqual([]);
   });
 });
 

@@ -460,9 +460,9 @@ button {
 
 .setup-step {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
-  align-items: center;
+  align-items: start;
   min-height: 62px;
   padding: 10px;
   border: 1px solid #d8e0e8;
@@ -487,6 +487,20 @@ button {
   font-size: 13px;
 }
 
+.setup-step-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setup-step-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
 .setup-step p {
   margin: 3px 0 0;
   color: #5f6e7d;
@@ -500,6 +514,73 @@ button {
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
+}
+
+.setup-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: max-content;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: #334155;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.setup-detail-toggle svg {
+  flex: 0 0 auto;
+}
+
+.setup-step-details {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setup-detail-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #dbe4ee;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.setup-detail-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setup-detail-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-detail-row span,
+.setup-detail-row small {
+  color: #607082;
+  font-size: 11px;
+}
+
+.setup-detail-row pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  padding: 8px;
+  color: #182331;
+  background: #eef3f8;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .setup-step.running {
@@ -537,6 +618,38 @@ button {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.setup-login-actions {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #cbd4df;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.setup-login-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #ffffff;
+  border-color: #176c64;
+  background: #218b82;
+}
+
+.setup-login-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.setup-login-actions span {
+  min-width: 0;
+  color: #5f6e7d;
+  font-size: 12px;
 }
 
 .setup-dialog-actions button {
@@ -1306,6 +1419,10 @@ button {
   }
 
   .wizard-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-login-actions {
     grid-template-columns: 1fr;
   }
 }

@@ -29,9 +29,16 @@ ENV PATH=/app/data/toolchains/android-sdk/platform-tools:/app/data/toolchains/an
 
 COPY package.json package-lock.json ./
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client python3 unzip zip \
+  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client python3 unzip zip default-jdk-headless imagemagick webp jq xz-utils chromium \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g @openai/codex@0.147.0 \
+  && npm install -g \
+    @openai/codex@0.147.0 \
+    mobile-docs-mcp@0.2.0 \
+    @upstash/context7-mcp@4.0.0 \
+    @mobilenext/mobile-mcp@1.0.2 \
+    @playwright/mcp@0.0.79 \
+    @modelcontextprotocol/server-memory@2026.7.4 \
+    @guanxiong/mcp-server-time@1.0.0 \
   && npm ci --omit=dev \
   && npm cache clean --force
 

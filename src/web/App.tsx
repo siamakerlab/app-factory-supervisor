@@ -4,6 +4,8 @@ import {
   Bell,
   Box,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Clock3,
@@ -247,8 +249,10 @@ type CapabilityResponse = {
   steps: Array<{
     id: string;
     label: string;
-    status: "pending" | "pass" | "fail" | "skipped";
+    status: "pending" | "running" | "pass" | "fail" | "skipped";
     output: string;
+    startedAt: string | null;
+    finishedAt: string | null;
   }>;
   artifactPath: string | null;
   startedAt: string | null;
@@ -271,6 +275,7 @@ type SetupStatus = {
   commandChecks: Array<{
     id: string;
     command: string;
+    args: string[];
     required: boolean;
     status: "pass" | "fail";
     output: string;
@@ -572,6 +577,7 @@ export function App() {
   const [hooksBusy, setHooksBusy] = useState(false);
   const [setupStepBusy, setSetupStepBusy] = useState(false);
   const [setupInstallPhase, setSetupInstallPhase] = useState<string | null>(null);
+  const [setupWaitingForCodexLogin, setSetupWaitingForCodexLogin] = useState(false);
   const [runBusyProjectId, setRunBusyProjectId] = useState<string | null>(null);
   const [exportBusyProjectId, setExportBusyProjectId] = useState<string | null>(null);
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
@@ -592,17 +598,37 @@ export function App() {
   }, [apiState, selectedProjectId]);
 
   useEffect(() => {
-    if (apiState !== "ready" || codexAuth?.login?.status !== "waiting_for_user") {
+    if (
+      apiState !== "ready" ||
+      !codexAuth?.login ||
+      !["starting", "waiting_for_user"].includes(codexAuth.login.status)
+    ) {
       return undefined;
     }
+    const refreshDelayMs = setupWaitingForCodexLogin ? 2000 : 5000;
     const interval = window.setInterval(() => {
       void refreshCodexAuth();
-    }, 5000);
+    }, refreshDelayMs);
     return () => window.clearInterval(interval);
-  }, [apiState, codexAuth?.login?.status]);
+  }, [apiState, codexAuth?.login?.status, setupWaitingForCodexLogin]);
 
   useEffect(() => {
-    const installing = toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy;
+    if (
+      apiState !== "ready" ||
+      !setupWaitingForCodexLogin ||
+      !codexAuth?.authenticated ||
+      setupStepBusy
+    ) {
+      return;
+    }
+    setSetupWaitingForCodexLogin(false);
+    setSetupInstallPhase("Codex login complete. Continuing setup");
+    void runFirstRunEnvironmentInstall();
+  }, [apiState, codexAuth?.authenticated, setupWaitingForCodexLogin, setupStepBusy]);
+
+  useEffect(() => {
+    const installing =
+      toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy;
     if (apiState !== "ready" || !installing) {
       return undefined;
     }
@@ -722,12 +748,14 @@ export function App() {
   async function refreshSetupProgress() {
     const [
       setupResponse,
+      codexAuthResponse,
       toolchainResponse,
       capabilityResponse,
       codexDocsResponse,
       codexHooksResponse
     ] = await Promise.all([
       fetch("/api/setup/status", { credentials: "include" }),
+      fetch("/api/codex/auth", { credentials: "include" }),
       fetch("/api/toolchain/status", { credentials: "include" }),
       fetch("/api/capabilities/status", { credentials: "include" }),
       fetch("/api/codex/docs", { credentials: "include" }),
@@ -735,6 +763,9 @@ export function App() {
     ]);
     if (setupResponse.ok) {
       setSetup((await setupResponse.json()) as SetupStatus);
+    }
+    if (codexAuthResponse.ok) {
+      setCodexAuth((await codexAuthResponse.json()) as CodexAuthResponse);
     }
     if (toolchainResponse.ok) {
       setToolchain((await toolchainResponse.json()) as ToolchainResponse);
@@ -934,7 +965,11 @@ export function App() {
     }
   }
 
-  async function startCodexDeviceLogin() {
+  async function startCodexDeviceLogin(options: { resumeSetup: boolean } = { resumeSetup: false }) {
+    if (options.resumeSetup) {
+      setSetupWaitingForCodexLogin(true);
+      setSetupInstallPhase("Waiting for Codex login");
+    }
     setCodexAuthBusy(true);
     try {
       const response = await fetch("/api/codex/auth/device/start", {
@@ -949,6 +984,9 @@ export function App() {
           codexHomeDir: current?.codexHomeDir ?? "",
           login
         }));
+        window.setTimeout(() => {
+          void refreshCodexAuth();
+        }, 500);
       } else {
         setApiState("error");
       }
@@ -1009,11 +1047,9 @@ export function App() {
   }
 
   async function runFirstRunEnvironmentInstall() {
+    let waitingForLogin = false;
     setSetupStepBusy(true);
-    setToolchainBusy(true);
-    setCapabilityBusy(true);
-    setCodexDocsBusy(true);
-    setHooksBusy(true);
+    setSetupWaitingForCodexLogin(false);
     setSetupInstallPhase("Preparing SSH access");
     try {
       if (setup?.steps.ssh !== "pass") {
@@ -1028,58 +1064,109 @@ export function App() {
         setSetup((await sshResponse.json()) as SetupStatus);
       }
 
-      setSetupInstallPhase("Installing Android build toolchain");
-      const toolchainResponse = await fetch("/api/toolchain/install", {
-        method: "POST",
-        credentials: "include"
-      });
-      if (!toolchainResponse.ok) {
-        setApiState("error");
-        return;
-      }
-      setToolchain((await toolchainResponse.json()) as ToolchainResponse);
-
-      setSetupInstallPhase("Installing MCP, skills, and agents");
-      const capabilityResponse = await fetch("/api/capabilities/install", {
-        method: "POST",
-        credentials: "include"
-      });
-      if (!capabilityResponse.ok) {
-        setApiState("error");
-        return;
-      }
-      setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
-
-      setSetupInstallPhase("Indexing Codex documentation");
-      const docsResponse = await fetch("/api/codex/docs/index", {
-        method: "POST",
-        credentials: "include"
-      });
-      if (!docsResponse.ok) {
-        setApiState("error");
-        return;
-      }
-      const docsIndex = (await docsResponse.json()) as CodexDocsIndexResponse;
-      setCodexDocs(docsIndex);
-      if (docsIndex.status !== "ready") {
-        setApiState("error");
-        return;
+      if (toolchain?.status !== "succeeded") {
+        setToolchainBusy(true);
+        setSetupInstallPhase("Installing Android build toolchain");
+        const toolchainResponse = await fetch("/api/toolchain/install", {
+          method: "POST",
+          credentials: "include"
+        });
+        setToolchainBusy(false);
+        if (!toolchainResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        setToolchain((await toolchainResponse.json()) as ToolchainResponse);
       }
 
-      setSetupInstallPhase("Installing Codex worker hooks");
-      const hooksResponse = await fetch("/api/codex/hooks/install", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({ force: false })
+      if (capabilities?.status !== "succeeded" || capabilities.missingRequiredCount > 0) {
+        setCapabilityBusy(true);
+        setSetupInstallPhase("Installing MCP, skills, and agents");
+        const capabilityResponse = await fetch("/api/capabilities/install", {
+          method: "POST",
+          credentials: "include"
+        });
+        setCapabilityBusy(false);
+        if (!capabilityResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        setCapabilities((await capabilityResponse.json()) as CapabilityResponse);
+      }
+
+      const currentAuthResponse = await fetch("/api/codex/auth", {
+        credentials: "include"
       });
-      if (!hooksResponse.ok) {
+      if (!currentAuthResponse.ok) {
         setApiState("error");
         return;
       }
-      setCodexHooks((await hooksResponse.json()) as CodexHookStatusResponse);
+      const currentAuth = (await currentAuthResponse.json()) as CodexAuthResponse;
+      setCodexAuth(currentAuth);
+      if (!currentAuth.authenticated) {
+        waitingForLogin = true;
+        setSetupWaitingForCodexLogin(true);
+        setSetupInstallPhase("Waiting for Codex login");
+        const loginResponse = await fetch("/api/codex/auth/device/start", {
+          method: "POST",
+          credentials: "include"
+        });
+        if (!loginResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        const login = (await loginResponse.json()) as CodexAuthResponse["login"];
+        setCodexAuth({ ...currentAuth, login });
+        window.setTimeout(() => {
+          void refreshCodexAuth();
+        }, 500);
+        return;
+      }
+      setSetupWaitingForCodexLogin(false);
+
+      if (codexDocs?.status !== "ready") {
+        setCodexDocsBusy(true);
+        setSetupInstallPhase("Indexing Codex documentation");
+        const docsResponse = await fetch("/api/codex/docs/index", {
+          method: "POST",
+          credentials: "include"
+        });
+        setCodexDocsBusy(false);
+        if (!docsResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        const docsIndex = (await docsResponse.json()) as CodexDocsIndexResponse;
+        setCodexDocs(docsIndex);
+        if (docsIndex.status !== "ready") {
+          setApiState("error");
+          return;
+        }
+      }
+
+      if (
+        !codexHooks ||
+        codexHooks.conflicts.length > 0 ||
+        codexHooks.configOwner !== "app" ||
+        codexHooks.hooksOwner !== "app"
+      ) {
+        setHooksBusy(true);
+        setSetupInstallPhase("Installing Codex worker hooks");
+        const hooksResponse = await fetch("/api/codex/hooks/install", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ force: false })
+        });
+        setHooksBusy(false);
+        if (!hooksResponse.ok) {
+          setApiState("error");
+          return;
+        }
+        setCodexHooks((await hooksResponse.json()) as CodexHookStatusResponse);
+      }
 
       setSetupInstallPhase("Verifying setup readiness");
       const setupResponse = await fetch("/api/setup/environment/verify", {
@@ -1092,7 +1179,9 @@ export function App() {
       }
       setSetup((await setupResponse.json()) as SetupStatus);
     } finally {
-      setSetupInstallPhase(null);
+      if (!waitingForLogin) {
+        setSetupInstallPhase(null);
+      }
       setSetupStepBusy(false);
       setHooksBusy(false);
       setCodexDocsBusy(false);
@@ -1234,6 +1323,7 @@ export function App() {
       : currentPage === "build"
         ? "Toolchain, Codex login, MCP, skills, agents, and runtime readiness."
         : "Single-user administration and operational configuration.";
+  const setupReady = Boolean(setup?.setupComplete && codexAuth?.authenticated);
 
   return (
     <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
@@ -1313,16 +1403,24 @@ export function App() {
           </div>
         </header>
 
-        {apiState === "ready" && setup && !setup.setupComplete ? (
+        {apiState === "ready" && setup && !setupReady ? (
           <FirstRunSetupDialog
             setup={setup}
+            setupReady={setupReady}
             toolchain={toolchain}
             capabilities={capabilities}
+            codexAuth={codexAuth}
             codexDocs={codexDocs}
             codexHooks={codexHooks}
-            installBusy={toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy}
+            installBusy={
+              toolchainBusy || capabilityBusy || codexDocsBusy || hooksBusy || setupStepBusy
+            }
+            codexAuthBusy={codexAuthBusy}
+            waitingForCodexLogin={setupWaitingForCodexLogin}
             installPhase={setupInstallPhase}
             onRunSetup={() => void runFirstRunEnvironmentInstall()}
+            onStartCodexLogin={() => void startCodexDeviceLogin({ resumeSetup: true })}
+            onCancelCodexLogin={() => void cancelCodexDeviceLogin()}
           />
         ) : null}
 
@@ -1345,7 +1443,7 @@ export function App() {
                 <h2>Project Queue</h2>
                 <button
                   type="button"
-                  disabled={apiState !== "ready" || !setup?.setupComplete}
+                  disabled={apiState !== "ready" || !setupReady}
                   onClick={() => setProjectWizardOpen((value) => !value)}
                 >
                   {projectWizardOpen ? "Close" : "New Project"}
@@ -1496,23 +1594,6 @@ export function App() {
                   >
                     {codexReviewBusy ? "Checking" : "Verify Codex"}
                   </button>
-                  {codexAuth?.login?.status === "waiting_for_user" ? (
-                    <button
-                      type="button"
-                      disabled={codexAuthBusy}
-                      onClick={() => void cancelCodexDeviceLogin()}
-                    >
-                      {codexAuthBusy ? "Cancelling" : "Cancel Login"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={apiState !== "ready" || codexAuthBusy}
-                      onClick={() => void startCodexDeviceLogin()}
-                    >
-                      {codexAuthBusy ? "Starting" : "Login Codex"}
-                    </button>
-                  )}
                   <button
                     type="button"
                     disabled={apiState !== "ready" || hooksBusy}
@@ -1522,7 +1603,6 @@ export function App() {
                   </button>
                 </div>
               </div>
-              <CodexDeviceLoginPanel codexAuth={codexAuth} />
               <KeyValueList rows={buildEnvironmentRows} />
             </div>
 
@@ -1742,31 +1822,57 @@ function StepHeader({
 
 function FirstRunSetupDialog({
   setup,
+  setupReady,
   toolchain,
   capabilities,
+  codexAuth,
   codexDocs,
   codexHooks,
   installBusy,
+  codexAuthBusy,
+  waitingForCodexLogin,
   installPhase,
-  onRunSetup
+  onRunSetup,
+  onStartCodexLogin,
+  onCancelCodexLogin
 }: {
   setup: SetupStatus;
+  setupReady: boolean;
   toolchain: ToolchainResponse | null;
   capabilities: CapabilityResponse | null;
+  codexAuth: CodexAuthResponse | null;
   codexDocs: CodexDocsIndexResponse | null;
   codexHooks: CodexHookStatusResponse | null;
   installBusy: boolean;
+  codexAuthBusy: boolean;
+  waitingForCodexLogin: boolean;
   installPhase: string | null;
   onRunSetup: () => void;
+  onStartCodexLogin: () => void;
+  onCancelCodexLogin: () => void;
 }) {
-  const steps = createFirstRunSteps(setup, toolchain, capabilities, codexDocs, codexHooks);
+  const steps = createFirstRunSteps(
+    setup,
+    toolchain,
+    capabilities,
+    codexAuth,
+    codexDocs,
+    codexHooks
+  );
   const completed = steps.filter((step) => step.status === "pass").length;
   const failed = steps.some((step) => step.status === "fail");
   const progress = Math.round((completed / steps.length) * 100);
+  const loginActive =
+    codexAuth?.login?.status === "starting" || codexAuth?.login?.status === "waiting_for_user";
 
   return (
     <div className="setup-dialog-backdrop" role="presentation">
-      <section className="setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-dialog-title">
+      <section
+        className="setup-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="setup-dialog-title"
+      >
         <div className="panel-heading">
           <div>
             <h2 id="setup-dialog-title">First-Run Setup</h2>
@@ -1774,7 +1880,9 @@ function FirstRunSetupDialog({
               Finish the required environment setup before creating Android/Kotlin projects.
             </p>
           </div>
-          <span className={failed ? "chip danger" : "chip muted"}>{installBusy ? "Installing" : `${progress}%`}</span>
+          <span className={failed ? "chip danger" : "chip muted"}>
+            {installBusy ? "Installing" : `${progress}%`}
+          </span>
         </div>
 
         <div className="progress-header">
@@ -1787,29 +1895,98 @@ function FirstRunSetupDialog({
 
         <ol className="setup-step-list">
           {steps.map((step, index) => (
-            <li className={`setup-step ${step.status}`} key={step.id}>
-              <span>{index + 1}</span>
-              <div>
-                <strong>{step.label}</strong>
-                <p>{step.detail}</p>
-              </div>
-              <em>{step.status}</em>
-            </li>
+            <SetupStepItem index={index} step={step} key={step.id} />
           ))}
         </ol>
 
+        {!codexAuth?.authenticated ? (
+          <div className="setup-login-actions">
+            <button
+              type="button"
+              disabled={codexAuthBusy}
+              onClick={loginActive ? onCancelCodexLogin : onStartCodexLogin}
+            >
+              {codexAuthBusy
+                ? loginActive
+                  ? "Cancelling Codex Login"
+                  : "Starting Codex Login"
+                : loginActive
+                  ? "Cancel Codex Login"
+                  : "Login Codex"}
+            </button>
+            <span>
+              {loginActive
+                ? "Use the URL and device code below. Setup continues after login is detected."
+                : "Start device login here before the final environment verification."}
+            </span>
+          </div>
+        ) : null}
+        <CodexDeviceLoginPanel codexAuth={codexAuth} />
+
         <div className="setup-dialog-actions">
           <button type="button" disabled={installBusy} onClick={onRunSetup}>
-            {installBusy ? "Installing" : failed ? "Retry Setup" : "Start Setup"}
+            {installBusy
+              ? "Installing"
+              : waitingForCodexLogin
+                ? "Check Login And Continue"
+                : failed
+                  ? "Retry Setup"
+                  : "Start Setup"}
           </button>
           <span>
-            {setup.setupComplete
+            {setupReady
               ? "Project creation is available."
               : "Project creation is locked until every required setup step passes."}
           </span>
         </div>
       </section>
     </div>
+  );
+}
+
+function SetupStepItem({ index, step }: { index: number; step: SetupDisplayStep }) {
+  const [expanded, setExpanded] = useState(step.status === "running" || step.status === "fail");
+  const hasDetails = step.details.length > 0;
+  return (
+    <li className={`setup-step ${step.status}`}>
+      <span>{index + 1}</span>
+      <div className="setup-step-body">
+        <div className="setup-step-main">
+          <div>
+            <strong>{step.label}</strong>
+            <p>{step.detail}</p>
+          </div>
+          <em>{step.status}</em>
+        </div>
+        {hasDetails ? (
+          <>
+            <button
+              type="button"
+              className="setup-detail-toggle"
+              onClick={() => setExpanded((current) => !current)}
+              aria-expanded={expanded}
+            >
+              {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              <span>Details</span>
+            </button>
+            {expanded ? (
+              <div className="setup-step-details">
+                {step.details.map((detail) => (
+                  <div className="setup-detail-row" key={detail.id}>
+                    <div>
+                      <strong>{detail.label}</strong>
+                      <span>{detail.status}</span>
+                    </div>
+                    {detail.meta ? <small>{detail.meta}</small> : null}
+                    {detail.output ? <pre>{detail.output}</pre> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
@@ -2498,12 +2675,22 @@ type SetupDisplayStep = {
   label: string;
   detail: string;
   status: "pending" | "running" | "pass" | "fail";
+  details: SetupDisplayDetail[];
+};
+
+type SetupDisplayDetail = {
+  id: string;
+  label: string;
+  status: string;
+  output: string | null;
+  meta?: string | undefined;
 };
 
 function createFirstRunSteps(
   setup: SetupStatus,
   toolchain: ToolchainResponse | null,
   capabilities: CapabilityResponse | null,
+  codexAuth: CodexAuthResponse | null,
   codexDocs: CodexDocsIndexResponse | null,
   codexHooks: CodexHookStatusResponse | null
 ): SetupDisplayStep[] {
@@ -2517,14 +2704,34 @@ function createFirstRunSteps(
     {
       id: "admin",
       label: "Admin account",
-      detail: setup.adminConfigured ? "Single admin account is configured." : "Create the first admin account.",
-      status: setupStepStatus(setup.steps.admin)
+      detail: setup.adminConfigured
+        ? "Single admin account is configured."
+        : "Create the first admin account.",
+      status: setupStepStatus(setup.steps.admin),
+      details: [
+        {
+          id: "admin-status",
+          label: "Admin account",
+          status: setup.adminConfigured ? "configured" : "pending",
+          output: setup.adminConfigured
+            ? "The first admin account exists."
+            : "No admin account is configured yet."
+        }
+      ]
     },
     {
       id: "ssh",
       label: "Git SSH key",
       detail: setup.sshPublicKeyPath ?? "Generate a deploy key for repository access.",
-      status: setupStepStatus(setup.steps.ssh)
+      status: setupStepStatus(setup.steps.ssh),
+      details: [
+        {
+          id: "ssh-key",
+          label: "SSH public key path",
+          status: setup.steps.ssh,
+          output: setup.sshPublicKeyPath ?? "SSH deploy key has not been generated."
+        }
+      ]
     },
     {
       id: "toolchain",
@@ -2534,7 +2741,11 @@ function createFirstRunSteps(
         runningStepLabel(toolchain?.steps) ??
         toolchain?.latestSnapshot?.snapshotName ??
         "Install Android SDK, Gradle, Java, emulator, image tools, and keystore tools.",
-      status: installStatus(toolchain?.status)
+      status: installStatus(toolchain?.status),
+      details: [
+        ...installStepDetails(toolchain?.steps),
+        ...installStepDetails(toolchain?.verification, "verify")
+      ]
     },
     {
       id: "capabilities",
@@ -2542,7 +2753,54 @@ function createFirstRunSteps(
       detail: capabilities
         ? `${capabilities.installedCount}/${capabilities.requiredCount} required capabilities configured.`
         : "Install and wire required Android development capabilities.",
-      status: installStatus(capabilities?.status)
+      status: installStatus(capabilities?.status),
+      details: [...installStepDetails(capabilities?.steps), ...capabilityIssueDetails(capabilities)]
+    },
+    {
+      id: "codex-auth",
+      label: "Codex login",
+      detail: codexAuth?.authenticated
+        ? `Codex is logged in at ${codexAuth.codexHomeDir}.`
+        : codexAuth?.login?.status === "waiting_for_user"
+          ? "Open the verification URL and enter the device code, then continue setup."
+          : "Login Codex before final environment verification.",
+      status: codexAuthStatus(codexAuth),
+      details: codexAuth
+        ? [
+            {
+              id: "codex-auth-home",
+              label: "Codex auth home",
+              status: codexAuth.authenticated ? "authenticated" : "not_logged_in",
+              output: codexAuth.codexHomeDir,
+              meta: codexAuth.authFilePresent ? "auth file present" : "auth file missing"
+            },
+            ...(codexAuth.login
+              ? [
+                  {
+                    id: "codex-login-code",
+                    label: "Device code",
+                    status: codexAuth.login.status,
+                    output: codexAuth.login.userCode ?? "Waiting for device code.",
+                    meta: codexAuth.login.expiresAt
+                      ? `expires ${codexAuth.login.expiresAt}`
+                      : undefined
+                  },
+                  {
+                    id: "codex-login-url",
+                    label: "Verification URL",
+                    status: codexAuth.login.status,
+                    output: codexAuth.login.verificationUri ?? "Waiting for verification URL."
+                  },
+                  {
+                    id: "codex-login-message",
+                    label: "Login message",
+                    status: codexAuth.login.status,
+                    output: codexAuth.login.message ?? "No login message."
+                  }
+                ]
+              : [])
+          ]
+        : []
     },
     {
       id: "docs",
@@ -2550,7 +2808,24 @@ function createFirstRunSteps(
       detail: codexDocs
         ? `${codexDocs.documentCount} documents, ${codexDocs.uniqueUrlCount} URLs indexed.`
         : "Index Codex usage, JSON mode, hooks, and compatibility documentation.",
-      status: docsStatus(codexDocs?.status)
+      status: docsStatus(codexDocs?.status),
+      details: codexDocs
+        ? [
+            {
+              id: "docs-smoke",
+              label: `Search smoke test: ${codexDocs.searchSmokeTest.query}`,
+              status: codexDocs.searchSmokeTest.status,
+              output: codexDocs.searchSmokeTest.outputPreview || codexDocs.gapReport || null,
+              meta: `${codexDocs.searchSmokeTest.resultCount} result(s)`
+            },
+            {
+              id: "docs-artifact",
+              label: "Index artifact",
+              status: codexDocs.status,
+              output: codexDocs.artifactPath ?? "No artifact has been written."
+            }
+          ]
+        : []
     },
     {
       id: "hooks",
@@ -2559,22 +2834,65 @@ function createFirstRunSteps(
         codexHooks?.conflicts && codexHooks.conflicts.length > 0
           ? codexHooks.conflicts.join(", ")
           : "Install app-managed stop/session hooks for worker completion detection.",
-      status: hookStatus
+      status: hookStatus,
+      details: codexHooks
+        ? [
+            {
+              id: "hook-files",
+              label: "Managed hook files",
+              status: `${codexHooks.configOwner}/${codexHooks.hooksOwner}`,
+              output: [`Config: ${codexHooks.configPath}`, `Hooks: ${codexHooks.hooksPath}`].join(
+                "\n"
+              )
+            },
+            ...codexHooks.conflicts.map((conflict, index) => ({
+              id: `hook-conflict-${index}`,
+              label: "Ownership conflict",
+              status: "fail",
+              output: conflict
+            }))
+          ]
+        : []
     },
     {
       id: "verify",
       label: "Environment verification",
-      detail: setup.lastError ?? "Verify all required commands before project creation is unlocked.",
-      status: setupStepStatus(setup.steps.environment)
+      detail:
+        setup.lastError ?? "Verify all required commands before project creation is unlocked.",
+      status: setupStepStatus(setup.steps.environment),
+      details: setup.commandChecks.map((check) => ({
+        id: check.id,
+        label: `${check.command} ${(check.args ?? []).join(" ")}`.trim(),
+        status: check.status,
+        output: check.output || null,
+        meta: check.required ? "required" : "optional"
+      }))
     }
   ];
 }
 
-function setupStepStatus(status: SetupStatus["steps"][keyof SetupStatus["steps"]]): SetupDisplayStep["status"] {
+function setupStepStatus(
+  status: SetupStatus["steps"][keyof SetupStatus["steps"]]
+): SetupDisplayStep["status"] {
   return status === "pass" ? "pass" : status === "fail" ? "fail" : "pending";
 }
 
-function installStatus(status: "not_started" | "running" | "succeeded" | "failed" | undefined): SetupDisplayStep["status"] {
+function codexAuthStatus(codexAuth: CodexAuthResponse | null): SetupDisplayStep["status"] {
+  if (codexAuth?.authenticated) {
+    return "pass";
+  }
+  if (codexAuth?.login?.status === "starting" || codexAuth?.login?.status === "waiting_for_user") {
+    return "running";
+  }
+  if (codexAuth?.login?.status === "failed" || codexAuth?.login?.status === "cancelled") {
+    return "fail";
+  }
+  return "pending";
+}
+
+function installStatus(
+  status: "not_started" | "running" | "succeeded" | "failed" | undefined
+): SetupDisplayStep["status"] {
   if (status === "succeeded") {
     return "pass";
   }
@@ -2602,8 +2920,53 @@ function docsStatus(
   return "pending";
 }
 
-function runningStepLabel(steps: Array<{ label: string; status: string }> | undefined): string | null {
+function runningStepLabel(
+  steps: Array<{ label: string; status: string }> | undefined
+): string | null {
   return steps?.find((step) => step.status === "running")?.label ?? null;
+}
+
+function installStepDetails(
+  steps:
+    | Array<{
+        id: string;
+        label: string;
+        status: string;
+        output: string;
+        startedAt?: string | null;
+        finishedAt?: string | null;
+      }>
+    | undefined,
+  prefix = "step"
+): SetupDisplayDetail[] {
+  return (steps ?? []).map((step) => ({
+    id: `${prefix}-${step.id}`,
+    label: step.label,
+    status: step.status,
+    output: step.output || null,
+    meta: [
+      step.startedAt ? `started ${step.startedAt}` : null,
+      step.finishedAt ? `finished ${step.finishedAt}` : null
+    ]
+      .filter(Boolean)
+      .join(" | ")
+  }));
+}
+
+function capabilityIssueDetails(capabilities: CapabilityResponse | null): SetupDisplayDetail[] {
+  return (capabilities?.capabilities ?? [])
+    .filter((capability) => capability.required && capability.status !== "configured")
+    .slice(0, 12)
+    .map((capability) => ({
+      id: `capability-${capability.type}-${capability.id}`,
+      label: `${capability.type}:${capability.id}`,
+      status: capability.status,
+      output:
+        typeof capability.description === "string"
+          ? capability.description
+          : "Required capability is not configured.",
+      meta: capability.installStage
+    }));
 }
 
 function versionTitle(project: ProjectSummary): string {

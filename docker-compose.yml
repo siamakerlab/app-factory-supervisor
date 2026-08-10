@@ -1,3 +1,5 @@
+name: app-factory-supervisor
+
 services:
   app:
     build:
@@ -28,11 +30,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+          'node -e "fetch(''http://127.0.0.1:3000/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
         ]
       interval: 10s
       timeout: 5s
@@ -46,6 +49,7 @@ services:
       POSTGRES_DB: app_factory_supervisor
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U app_factory -d app_factory_supervisor"]
       interval: 10s
@@ -54,5 +58,8 @@ services:
 
 volumes:
   app_data:
+    name: app-factory-supervisor_app_data
   app_projects:
+    name: app-factory-supervisor_app_projects
   postgres_data:
+    name: app-factory-supervisor_postgres_data
