@@ -453,17 +453,22 @@ export class CapabilityService {
         );
         throw new Error(`Failed to install ${capability.id}: ${install.output || install.error}`);
       }
-      const version = await runCommand(config.command, ["--version"], 30_000);
-      if (version.exitCode !== 0) {
+      const commandCheck = await runCommand(
+        "sh",
+        ["-lc", `command -v ${shellQuote(config.command)}`],
+        5_000
+      );
+      if (commandCheck.exitCode !== 0) {
         await this.markCapabilityStatus(
           capability,
           "missing",
-          version.output || `${config.command} --version failed`
+          commandCheck.output || commandCheck.error || `${config.command} is not executable`
         );
         throw new Error(`Installed ${capability.id}, but ${config.command} is not executable.`);
       }
+      const packageVersion = await readGlobalNpmPackageVersion(config.npmPackage);
       await this.markCapabilityStatus(capability, "configured", null, {
-        version: firstLine(version.output) || config.packageVersion
+        version: packageVersion ?? config.packageVersion
       });
       outputs.push(`${capability.id}: ${spec} (${config.command})`);
     }
@@ -897,6 +902,20 @@ function runCommand(
       });
     });
   });
+}
+
+async function readGlobalNpmPackageVersion(packageName: string): Promise<string | null> {
+  const script = [
+    "const cp=require('child_process');",
+    "const root=cp.execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim();",
+    `console.log(require(root + '/' + ${JSON.stringify(packageName)} + '/package.json').version);`
+  ].join("");
+  const result = await runCommand("node", ["-e", script], 5_000);
+  return result.exitCode === 0 ? firstLine(result.output) : null;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function firstLine(value: string): string | null {

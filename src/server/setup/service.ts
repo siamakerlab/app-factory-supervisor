@@ -52,7 +52,15 @@ type SetupRow = {
 const commandChecks: CommandCheckDefinition[] = [
   { id: "codex", command: "codex", args: ["--version"], required: true },
   { id: "codex-login-status", command: "codex", args: ["login", "status"], required: true },
-  { id: "docs-mcp-server", command: "docs-mcp-server", args: ["--version"], required: true },
+  {
+    id: "docs-mcp-server",
+    command: "node",
+    args: [
+      "-e",
+      "const cp=require('child_process');const root=cp.execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim();console.log(require(`${root}/mobile-docs-mcp/package.json`).version);"
+    ],
+    required: true
+  },
   { id: "context7-mcp", command: "context7-mcp", args: ["--version"], required: true },
   { id: "mcp-server-mobile", command: "mcp-server-mobile", args: ["--version"], required: true },
   { id: "playwright-mcp", command: "playwright-mcp", args: ["--version"], required: true },
@@ -155,16 +163,11 @@ export class SetupService {
     });
 
     if (!(await fileExists(publicKeyPath))) {
-      await runCommand("ssh-keygen", [
-        "-t",
-        "ed25519",
-        "-N",
-        "",
-        "-f",
-        privateKeyPath,
-        "-C",
-        "app-factory-supervisor"
-      ], this.commandEnv());
+      await runCommand(
+        "ssh-keygen",
+        ["-t", "ed25519", "-N", "", "-f", privateKeyPath, "-C", "app-factory-supervisor"],
+        this.commandEnv()
+      );
     }
 
     await this.database.pool.query(
